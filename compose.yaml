@@ -1,0 +1,69 @@
+services:
+  opensearch:
+    image: opensearchproject/opensearch:2.19.6
+    container_name: opensearch
+    environment:
+      - "OPENSEARCH_INITIAL_ADMIN_PASSWORD=Opensearch16admin#"
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - plugins.ml_commons.controller_enabled=true
+      - plugins.ml_commons.local_model.enabled=true
+      - plugins.security.ssl.http.enabled=false
+      - plugins.ml_commons.only_run_on_ml_node=false
+      - plugins.ml_commons.model_access_control_enabled=true
+      - plugins.ml_commons.native_memory_threshold=99
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - 9200:9200
+      - 9600:9600
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    networks:
+      - games
+    
+  postgres:
+    image: postgres:17
+    container_name: postgres
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: games
+    ports:
+      - 5432:5432
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - games
+
+  grafana:
+    image: grafana
+    container_name: grafana
+    ports:
+      - 3000:3000
+    networks:
+      - games
+
+  # sagebot:
+  #   build:
+  #     context: .
+  #     dockerfile: dockerfile
+  #   ports:
+  #     - 8501:8501
+  #   volumes:
+  #     - grafana-data:/var/lib/grafana/data
+  #   networks:
+  #     - games
+
+networks:
+  games:
+    name: games
+
+volumes:
+  opensearch-data:
+    driver: local
+  postgres-data:
+    name: postgres-data
