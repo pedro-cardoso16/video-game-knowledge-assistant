@@ -224,3 +224,5 @@ playground.py
 *.zip
 *.onnx
 info.json
+data/opensearch
+data/postgres
