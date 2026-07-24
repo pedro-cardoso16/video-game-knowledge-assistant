@@ -1,6 +1,6 @@
 import pydantic
 import time
-
+import random
 from opensearch_utils import search
 from opensearchpy import OpenSearch
 from google.genai import Client
@@ -81,6 +81,7 @@ class RAGClient:
         model: str = "gemini-3.1-flash-lite",
         ai_client: Client | None = None,
     ) -> None:
+        self.usage_history = []
         self.last_history = None
         self.__tools: list = []
         self.__search_engine: OpenSearch | None = None
@@ -92,6 +93,9 @@ class RAGClient:
 
         self.add_tool(opensearch_search)
 
+    def flush_usage_history(self):
+        self.usage_history = []
+
     def llm(self, query: str, config={}):
         """LLM query without agentic tooling or RAG
 
@@ -102,11 +106,15 @@ class RAGClient:
         default_config = {"system_instruction": INSTRUCTION}
         config = default_config | config
 
-        return self.__client.models.generate_content(
+        response = self.__client.models.generate_content(
             model=self.__model,
             contents=query,
             config=config,
         )
+
+        self.usage_history.append(response.usage_metadata)
+
+        return response
 
     def rag(self, query: str) -> str:
         """Retrieval Augmented Generation with Agentic Tool Use
@@ -120,36 +128,47 @@ class RAGClient:
         ]
 
         max_turns = 5
+        max_retries = 5
         turn = 0
 
         while turn < max_turns:
-            try:
-                # Call the LLM with the full history
-                response = self.__client.models.generate_content(
-                    model=self.__model,
-                    contents=history,
-                    config=types.GenerateContentConfig(
-                        system_instruction=INSTRUCTION,
-                        tools=[opensearch_search],
-                        tool_config=types.ToolConfig(
-                            function_calling_config=types.FunctionCallingConfig(
-                                # Initial call forces tool use; subsequent calls are AUTO
-                                mode=(
-                                    types.FunctionCallingConfigMode.ANY
-                                    if turn == 0
-                                    else types.FunctionCallingConfigMode.AUTO
+            retries = 0
+            response = None
+            while retries < max_retries: 
+                try:
+                    # Call the LLM with the full history
+                    response = self.__client.models.generate_content(
+                        model=self.__model,
+                        contents=history,
+                        config=types.GenerateContentConfig(
+                            system_instruction=INSTRUCTION,
+                            tools=[opensearch_search],
+                            tool_config=types.ToolConfig(
+                                function_calling_config=types.FunctionCallingConfig(
+                                    # Initial call forces tool use; subsequent calls are AUTO
+                                    mode=(
+                                        types.FunctionCallingConfigMode.ANY
+                                        if turn == 0
+                                        else types.FunctionCallingConfigMode.AUTO
+                                    ),
                                 ),
                             ),
                         ),
-                    ),
-                )
-            except APIError as e:
-                if "429" in str(e):
-                    print("Quota exceeded (429). Retrying in 30 seconds...")
-                    time.sleep(30)
-                    continue
-                raise e
+                    )
 
+                    self.usage_history.append(response.usage_metadata)
+                    break
+
+                except APIError as e:
+                    if "429" in str(e):
+                        retries += 1
+                        wait_time = (2**retries) * 10 + random.random()
+                        print(f"Quota exceeded (429). Retrying in {wait_time:.2f} seconds...")
+                        time.sleep(wait_time)
+                        continue
+                    raise e
+
+            print("Successfully retrieved the content.")
             # Extract text parts manually to avoid the 'non-text parts' warning from .text property
             text_parts = [
                 p.text for p in response.candidates[0].content.parts if p.text
@@ -190,10 +209,10 @@ class RAGClient:
 
                     results = self.search(**safe_args)
 
-                    # Clean results: OpenSearch returns a dict with hits -> hits. 
+                    # Clean results: OpenSearch returns a dict with hits -> hits.
                     # We must extract _source and ignore vectors.
                     cleaned_results = []
-                    
+
                     # Handle OpenSearch response structure
                     hits = []
                     if isinstance(results, dict) and "hits" in results:
@@ -203,19 +222,26 @@ class RAGClient:
 
                     for hit in hits:
                         # Get the actual document source
-                        source = hit.get("_source", hit) if isinstance(hit, dict) else hit
-                        
+                        source = (
+                            hit.get("_source", hit) if isinstance(hit, dict) else hit
+                        )
+
                         if isinstance(source, dict):
                             # Filter out the vector fields and technical metadata to get the actual content
                             # We exclude any field containing 'vector' or 'embedding' to be generic
                             content_fields = [
-                                f"{k}: {v}" 
-                                for k, v in source.items() 
-                                if not any(bad in k.lower() for bad in ["vector", "embedding", "id"])
+                                f"{k}: {v}"
+                                for k, v in source.items()
+                                if not any(
+                                    bad in k.lower()
+                                    for bad in ["vector", "embedding", "id"]
+                                )
                             ]
-                            
+
                             text_val = ", ".join(content_fields)
-                            cleaned_results.append(text_val[:1000] if text_val else "Empty document")
+                            cleaned_results.append(
+                                text_val[:1000] if text_val else "Empty document"
+                            )
                         else:
                             cleaned_results.append(str(source)[:1000])
 
@@ -253,10 +279,14 @@ class RAGClient:
         search_type: Literal["lexical", "hybrid", "semantic"] = "lexical",
         search_fields: Iterable[str] | None = None,
         boost_dict: dict = {},
+        doc_id: str | None = None,
     ):
 
         if self.search_engine is None:
             raise RuntimeError("Search engine not initialized.")
+
+        if doc_id is not None:
+            return self.search_engine.get(index=index, id=doc_id)
 
         return search(
             self.search_engine,

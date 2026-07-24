@@ -90,7 +90,7 @@ class IGDB:
 
         if index is None:
             index = "index"
-        
+
         # index = "igdb_" + datetime.now().isoformat(sep="-", timespec="seconds").replace(
         #     ":", ""
         # )
@@ -243,8 +243,15 @@ class Wikipedia:
         )
         # Split keywords by signal strength
         strong_keywords = {
-            "video game", "video games", "gameplay", "game engine", 
-            "game console", "gaming console", "platformer", "rpg", "fps"
+            "video game",
+            "video games",
+            "gameplay",
+            "game engine",
+            "game console",
+            "gaming console",
+            "platformer",
+            "rpg",
+            "fps",
         }
         brand_keywords = {"playstation", "xbox", "nintendo", "sega", "game boy"}
 
@@ -270,16 +277,25 @@ class Wikipedia:
             title_lower = article["title"].lower()
 
             # 1. Check Title: Very high signal
-            title_match = any(re.search(rf"\b{re.escape(kw)}\b", title_lower) for kw in strong_keywords | brand_keywords)
-            
+            title_match = any(
+                re.search(rf"\b{re.escape(kw)}\b", title_lower)
+                for kw in strong_keywords | brand_keywords
+            )
+
             # 2. Check Lead Text: Medium signal
-            # We require at least TWO matches in the lead text to reduce noise, 
+            # We require at least TWO matches in the lead text to reduce noise,
             # OR one very strong keyword.
             lead_text = text_lower[:2000]
-            strong_match = any(re.search(rf"\b{re.escape(kw)}\b", lead_text) for kw in strong_keywords)
-            
-            brand_matches = sum(1 for kw in brand_keywords if re.search(rf"\b{re.escape(kw)}\b", lead_text))
-            
+            strong_match = any(
+                re.search(rf"\b{re.escape(kw)}\b", lead_text) for kw in strong_keywords
+            )
+
+            brand_matches = sum(
+                1
+                for kw in brand_keywords
+                if re.search(rf"\b{re.escape(kw)}\b", lead_text)
+            )
+
             if title_match or strong_match or brand_matches >= 2:
                 # Save to file (no 'if' check needed thanks to NullFile)
                 f.write(json.dumps(article) + "\n")
@@ -342,8 +358,11 @@ if __name__ == "__main__":
 
     from evaluation import Evaluator
     from llm import RAGClient
-    model = "gemma-4-31b-it"
+
     model = "gemini-3.1-flash-lite"
+    model = "gemini-3.5-flash-lite"
+    model = "gemma-4-31b-it"
+
     rag_client = RAGClient(opensearch_client, model)
     evaluator = Evaluator(rag_client, None)
 
@@ -359,17 +378,13 @@ if __name__ == "__main__":
     # hr_score, mrr_score, x = evaluator.evaluate_search(index="wikipedia",search_type="hybrid")
     # print(hr_score, mrr_score, x, sep="\n\n")
 
-
     evaluator.ground_truth = pd.read_csv("data/igdb_ground_truth.csv")
     judge = RAGClient(opensearch_client, model=model)
-    evaluator.evaluate_agent(judge, overwrite=False)
+    evaluator.evaluate_agent(judge, overwrite=False, max_workers=1,index="igdb")
 
     evaluator.ground_truth = pd.read_csv("data/wikipedia_ground_truth.csv")
-    evaluator.evaluate_agent(judge, overwrite=False)
-
-
+    evaluator.evaluate_agent(judge, overwrite=False, max_workers=1, index="wikipedia")
 
     # Boosting optimization
-
 
     # print(hr_score, mrr_score, x)
