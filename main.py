@@ -3,11 +3,12 @@ import json
 import pandas as pd
 import sys
 from ingest import IGDB
+import metrics
 
 from google.genai import Client, types
 from dotenv import load_dotenv
 from opensearchpy import OpenSearch
-from query import ops_client
+from query import opensearch_client
 from llm import RAGClient
 from metrics import evaluate_search
 from opensearch_utils import get_models, setup_embedder, search
@@ -29,13 +30,14 @@ if __name__ == "__main__":
         verify_certs=False,  # Set to True if using valid certificates
         ssl_show_warn=False,
     )
-    ai = RAGClient(
-        opensearch_client,
-        model="gemini-3.1-flash-lite"
-    )
+
+    # igdb = IGDB(opensearch_client)
+    # igdb.pull_all(index="igdb")
+
+    ai = RAGClient(opensearch_client, model="gemini-3.1-flash-lite")
 
     response = ai.rag(
-        query="What are the reviews for the Final Fantasy VII Remake? And would you recommend me to play it based on the reviews?"
+        query="What are the reviews of Dark Souls"
     )
 
     print(response)

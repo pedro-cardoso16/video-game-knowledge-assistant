@@ -19,22 +19,23 @@ factually accurate information sourced EXCLUSIVELY from the provided search tool
    internal knowledge. Even if you believe you know the answer, you MUST call the 
    `opensearch_search` tool first to retrieve the most current data from the database.
    
-2. **EVIDENCE-BASED RESPONSES**: Every claim in your answer must be supported by the 
+2. **QUERY REWRITING**: When calling search tools, do not simply pass the user's query. 
+   Rephrase and optimize the query to improve search recall. Extract key entities and 
+   concepts to create a search term that is likely to match the stored document metadata.
+   
+3. **EVIDENCE-BASED RESPONSES**: Every claim in your answer must be supported by the 
    results returned from the search tool. Do not invent facts or "hallucinate" details.
 
-3. **TRANSPARENCY**: You must explicitly state which tool and index you used to 
+4. **TRANSPARENCY**: You must explicitly state which tool and index you used to 
    find the information (e.g., "Based on the IGDB index...").
 
-4. **FALLBACK**: If the search tool returns no results or the information is 
+5. **FALLBACK**: If the search tool returns no results or the information is 
    insufficient to answer the question accurately, simply state: "I don't know."
 
 ## STYLE GUIDELINES:
 - Be concise and objective.
 - Briefly explain your reasoning based on the retrieved context.
 - Answer ONLY using information you can support with tool evidence.
-
-## Note: 
-For now the only index that you can use is 'igdb' in the search tools.
 """.strip()
 
 # You may answer questions that unrelated to video games if they are easy and
@@ -78,12 +79,13 @@ class RAGClient:
         self,
         search_engine: OpenSearch | None,
         model: str = "gemini-3.1-flash-lite",
-        client: Client | None = None,
+        ai_client: Client | None = None,
     ) -> None:
+        self.last_history = None
         self.__tools: list = []
         self.__search_engine: OpenSearch | None = None
 
-        self.__client: Client = client if client else gen_client()
+        self.__client: Client = ai_client if ai_client else gen_client()
 
         self.__model: str = model
         self.search_engine = search_engine
@@ -149,8 +151,10 @@ class RAGClient:
                 raise e
 
             # Extract text parts manually to avoid the 'non-text parts' warning from .text property
-            text_parts = [p.text for p in response.candidates[0].content.parts if p.text]
-            
+            text_parts = [
+                p.text for p in response.candidates[0].content.parts if p.text
+            ]
+
             # If the model provides a final text answer AND no tool calls, we are done
             if text_parts and not response.function_calls:
                 # Add the final response to history for completeness
@@ -159,6 +163,8 @@ class RAGClient:
                         role="model", parts=response.candidates[0].content.parts
                     )
                 )
+
+                self.last_history = history
                 return "\n".join(text_parts)
 
             # Otherwise, the model wants to call tools
@@ -180,19 +186,41 @@ class RAGClient:
                 if name == "opensearch_search":
                     # Sanitize and limit arguments to prevent quota exhaustion
                     safe_args = (args or {}).copy()
-                    safe_args['num'] = min(safe_args.get('num', 3), 3)
-                    
+                    safe_args["num"] = min(safe_args.get("num", 3), 3)
+
                     results = self.search(**safe_args)
-                    
-                    # Clean results: only send essential text to the LLM to save tokens
+
+                    # Clean results: OpenSearch returns a dict with hits -> hits. 
+                    # We must extract _source and ignore vectors.
                     cleaned_results = []
-                    if isinstance(results, list):
-                        for res in results:
-                            # Assuming result is a dict from OpenSearch _source
-                            text = str(res) if not isinstance(res, dict) else str(res.get('storyline', res.get('name', res)))
-                            cleaned_results.append(text[:1000]) # Truncate to 1000 chars
-                    else:
-                        cleaned_results = [str(results)[:1000]]
+                    
+                    # Handle OpenSearch response structure
+                    hits = []
+                    if isinstance(results, dict) and "hits" in results:
+                        hits = results["hits"].get("hits", [])
+                    elif isinstance(results, list):
+                        hits = results
+
+                    for hit in hits:
+                        # Get the actual document source
+                        source = hit.get("_source", hit) if isinstance(hit, dict) else hit
+                        
+                        if isinstance(source, dict):
+                            # Filter out the vector fields and technical metadata to get the actual content
+                            # We exclude any field containing 'vector' or 'embedding' to be generic
+                            content_fields = [
+                                f"{k}: {v}" 
+                                for k, v in source.items() 
+                                if not any(bad in k.lower() for bad in ["vector", "embedding", "id"])
+                            ]
+                            
+                            text_val = ", ".join(content_fields)
+                            cleaned_results.append(text_val[:1000] if text_val else "Empty document")
+                        else:
+                            cleaned_results.append(str(source)[:1000])
+
+                    if not cleaned_results:
+                        cleaned_results = ["No relevant information found."]
 
                     tool_responses.append(
                         types.Part.from_function_response(
@@ -224,6 +252,7 @@ class RAGClient:
         model_id: str | None = None,
         search_type: Literal["lexical", "hybrid", "semantic"] = "lexical",
         search_fields: Iterable[str] | None = None,
+        boost_dict: dict = {},
     ):
 
         if self.search_engine is None:
@@ -235,7 +264,7 @@ class RAGClient:
             query,
             num,
             model_id,
-            {},
+            boost_dict,
             search_type,
             search_fields,
         )
@@ -289,6 +318,8 @@ def build_prompt(question: str, context: str):
 
 def gen_client() -> Client:
     load_dotenv()
-    client = Client()
+    client = Client(
+        # http_options={"timeout": 10},
+    )
 
     return client

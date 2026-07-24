@@ -27,7 +27,11 @@ mean_reciprocal_rank = mrr
 def evaluate_search(
     ground_truth: pd.DataFrame, search_func: Callable[[str], list[dict]]
 ) -> tuple[float, float, pd.DataFrame]:
-    # Relevance matrix.
+    """
+    
+    Returns:
+        (hit rate, mean reciprocal rank, relevance matrix)
+    """
     x = []
 
     for i in range(len(ground_truth)):
@@ -39,7 +43,7 @@ def evaluate_search(
         doc_id = row["doc_id"]
 
         results = search_func(query)
-        r = [1 if (result["_id"] == str(doc_id)) else 0 for result in results]
+        r = [1 if (result["_id"] == str(doc_id)) else 0 for result in results['hits']['hits']]
 
         x.append(r.copy())
 

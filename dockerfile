@@ -1,11 +1,17 @@
-FROM alpine
-
-COPY . /app
-COPY src /app
+FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN apk add python3
-RUN python3 -m pip install uv && uv sync --lock
+# Copy dependency files
+COPY requirements.txt .
+
+# Install dependencies using pip
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application
+COPY . .
 
 EXPOSE 8501
+
+# Command to run streamlit
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]

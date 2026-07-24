@@ -315,79 +315,84 @@ def search(
     fields = list(search_fields) if search_fields else ["*"]
     query_block = {}
 
+
+    if model_id is None:
+        model_id = get_models(opensearch_client)[0]
+
     match search_type:
         case "lexical":
             boosted_fields = [f"{f}^{boost_dict.get(f, 1)}" for f in fields]
             query_block = {"multi_match": {"query": query, "fields": boosted_fields}}
 
         case "semantic":
-            if len(fields) == 1:
-                field = fields[0]
-                query_block = {
+            # if len(fields) == 1:
+            if fields[0] == '*':
+                fields = get_vector_fields(opensearch_client, index)
+                # Remove the '_vector' suffix if you need the original text field names
+                fields = [f.replace("_vector", "") for f in fields]
+            
+            # query_block = {
+            #     "neural": {
+            #         f"{field}_vector": (
+            #             {
+            #                 "query_text": query,
+            #                 "model_id": model_id,
+            #             }
+            #         )
+            #     }
+            # }
+            # else:
+            should_queries = [
+                {
                     "neural": {
-                        f"{field}_vector": (
+                        f"{key}_vector": (
                             {
                                 "query_text": query,
                                 "model_id": model_id,
                             }
-                            if model_id
-                            else {"query_text": query}
                         )
                     }
                 }
-            else:
-                should_queries = [
-                    {
-                        "neural": {
-                            f"{key}_vector": (
-                                {
-                                    "query_text": query,
-                                    "model_id": model_id,
-                                }
-                                if model_id
-                                else {"query_text": query}
-                            )
-                        }
-                    }
-                    for key in fields
-                ]
-                query_block = {"bool": {"should": should_queries}}
+                for key in fields
+            ]
+            query_block = {"bool": {"should": should_queries}}
 
         case "hybrid":
-            if len(fields) == 1:
-                field = fields[0]
-                neural_part = {
-                    "neural": {
-                        f"{field}_vector": (
-                            {
-                                "query_text": query,
-                                "model_id": model_id,
+            if fields[0] == '*':
+                fields = get_vector_fields(opensearch_client, index)
+                # Remove the '_vector' suffix if you need the original text field names
+                fields = [f.replace("_vector", "") for f in fields]
+
+            # if len(fields) == 1:
+            #     field = fields[0]
+                 # neural_part = {
+                #     "neural": {
+                #         f"{field}_vector": (
+                #             {
+                #                 "query_text": query,
+                #                 "model_id": model_id,
+                #             }
+                #         )
+                #     }
+                # }
+            # else:
+            neural_part = {
+                "bool": {
+                    "should": [
+                        {
+                            "neural": {
+                                f"{key}_vector": (
+                                    {
+                                        "query_text": query,
+                                        "model_id": model_id,
+                                    }
+                                )
                             }
-                            if model_id
-                            else {"query_text": query}
-                        )
-                    }
+                        }
+                        for key in fields
+                    ]
                 }
-            else:
-                neural_part = {
-                    "bool": {
-                        "should": [
-                            {
-                                "neural": {
-                                    f"{key}_vector": (
-                                        {
-                                            "query_text": query,
-                                            "model_id": model_id,
-                                        }
-                                        if model_id
-                                        else {"query_text": query}
-                                    )
-                                }
-                            }
-                            for key in fields
-                        ]
-                    }
-                }
+            }
 
             boosted_fields = [f"{f}^{boost_dict.get(f, 1)}" for f in fields]
             query_block = {
@@ -410,3 +415,17 @@ def search(
     }
 
     return opensearch_client.search(index=index, body=body)
+
+
+def get_vector_fields(opensearch_client: OpenSearch, index_name: str) -> list[str]:
+    """Retrieves all field names from an index that end with '_vector'."""
+    # 1. Fetch the mapping for the index
+    response = opensearch_client.indices.get_mapping(index=index_name)
+    
+    # 2. Navigate the response structure: {index_name}: {mappings: {properties: {...}}}
+    properties = response[index_name].get("mappings", {}).get("properties", {})
+    
+    # 3. Filter for fields ending in '_vector'
+    vector_fields = [field for field in properties.keys() if field.endswith("_vector")]
+    
+    return vector_fields

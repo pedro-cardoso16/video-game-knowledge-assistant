@@ -5,7 +5,7 @@ import os
 from datasets import load_dataset
 from opensearchpy import OpenSearch, helpers
 
-ops_client = OpenSearch(
+opensearch_client = OpenSearch(
     hosts=[{"host": "localhost", "port": 9200}],
     http_auth=("admin", "Opensearch16admin#"),
     use_ssl=False,

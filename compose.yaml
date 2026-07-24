@@ -6,7 +6,7 @@ services:
       - "OPENSEARCH_INITIAL_ADMIN_PASSWORD=Opensearch16admin#"
       - discovery.type=single-node
       - bootstrap.memory_lock=true
-      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "OPENSEARCH_JAVA_OPTS=-Xms8g -Xmx8g"
       - plugins.ml_commons.controller_enabled=true
       - plugins.ml_commons.local_model.enabled=true
       - plugins.security.ssl.http.enabled=false
@@ -21,7 +21,7 @@ services:
       - 9200:9200
       - 9600:9600
     volumes:
-      - opensearch-data:/usr/share/opensearch/data
+      - ./data/opensearch:/usr/share/opensearch/data
     networks:
       - games
     
@@ -35,7 +35,8 @@ services:
     ports:
       - 5432:5432
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
     networks:
       - games
 
@@ -47,16 +48,19 @@ services:
     networks:
       - games
 
-  # sagebot:
-  #   build:
-  #     context: .
-  #     dockerfile: dockerfile
-  #   ports:
-  #     - 8501:8501
-  #   volumes:
-  #     - grafana-data:/var/lib/grafana/data
-  #   networks:
-  #     - games
+  sagebot:
+    build:
+      context: .
+      dockerfile: dockerfile
+    ports:
+      - 8501:8501
+    environment:
+      - OPENSEARCH_HOST=opensearch
+      - OPENSEARCH_PORT=9200
+      - OPENSEARCH_USER=admin
+      - OPENSEARCH_PASSWORD=Opensearch16admin#
+    networks:
+      - games
 
 networks:
   games:
