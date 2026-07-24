@@ -2,7 +2,7 @@
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-orange?style=for-the-badge&logo=buy-me-a-coffee&logoColor=white)](https://www.buymeacoffee.com/pedro.cardoso) -->
 
 ## Acknowledgments
-This project was developed as part of the LLM Zoomcamp cohort leaded by instructor @alexeygrigorev.
+This project was developed as part of the LLM Zoomcamp cohort leaded by instructor [@alexeygrigorev](https://github.com/alexeygrigorev).
 Special thanks to the [DataTalksClub/llm-zoomcamp](https://github.com/DataTalksClub/llm-zoomcamp) community for providing the resources and framework for this project.
 
 # Video game knowledge assistant
