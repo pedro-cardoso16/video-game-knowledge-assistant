@@ -11,7 +11,7 @@ load_dotenv()
 OPENSEARCH_HOST = os.getenv("OPENSEARCH_HOST", "localhost")
 OPENSEARCH_PORT = int(os.getenv("OPENSEARCH_PORT", 9200))
 OPENSEARCH_USER = os.getenv("OPENSEARCH_USER", "admin")
-OPENSEARCH_PASSWORD = os.getenv("OPENSEARCH_PASSWORD", "admin")
+OPENSEARCH_PASSWORD = os.getenv("OPENSEARCH_PASSWORD", "Opensearch16admin#")
 
 # --- Clients Setup ---
 @st.cache_resource
@@ -20,9 +20,9 @@ def get_rag_client():
     opensearch_client = OpenSearch(
         hosts=[{'host': OPENSEARCH_HOST, 'port': OPENSEARCH_PORT}],
         http_auth=(OPENSEARCH_USER, OPENSEARCH_PASSWORD),
-        use_ssl=True, 
+        use_ssl=False, 
         verify_certs=False,
-        ssl_assert_hostname=False,
+        # ssl_assert_hostname=False,
         ssl_show_warn=False,
     )
     # Initialize RAGClient from llm.py

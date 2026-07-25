@@ -380,7 +380,7 @@ if __name__ == "__main__":
 
     evaluator.ground_truth = pd.read_csv("data/igdb_ground_truth.csv")
     judge = RAGClient(opensearch_client, model=model)
-    evaluator.evaluate_agent(judge, overwrite=False, max_workers=1,index="igdb")
+    evaluator.evaluate_agent(judge, overwrite=False, max_workers=1, index="igdb")
 
     evaluator.ground_truth = pd.read_csv("data/wikipedia_ground_truth.csv")
     evaluator.evaluate_agent(judge, overwrite=False, max_workers=1, index="wikipedia")
