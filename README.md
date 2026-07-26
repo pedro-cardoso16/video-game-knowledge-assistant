@@ -55,7 +55,7 @@ graph TD
     User((User)) <--> Assistant(assistant)
     Assistant <--> OpenSearch
     B --> OpenSearch(opensearch) 
-    IGDB[("IGDB\n(remote)")] -->|ingest| B[("local DB")]
+    IGDB[("IGDB\n(remote)")] -->|ingest| B[("index DB\n(local)")]
     WIKIPEDIA[("Wikipedia\n(remote)")] -->|ingest| B
 ```
 
@@ -81,9 +81,9 @@ using the generated questions as a query
 title: Ground truth generation pipeline
 ---
 flowchart LR
-DB[(DB)] -->|retrieve| LLM
+DB[(index DB)] -->|retrieve| LLM
 LLM(LLM) -->|generate| Q(questions) 
-Q --> S(search)
+Q --> GT[(ground truth DB)]
 ```
 ```mermaid
 ---
@@ -98,8 +98,6 @@ GT(ground truth) --> E
 E --> MRR("MRR (mean reciprocal rank)")
 E --> HR("HR (hit rate)")
 ```
-
-
 
 #### Agent evaluation
 Once our search tools are optimized, we can proceed to the complete RAG evaluation.
@@ -169,3 +167,5 @@ We can observe the model's performance and usage in the tab <!-- Insert tab name
 * LLM-judge evaluations on tool usage and answer quality
 * The token usage (input and output) and price (if you are using a paid model).
 
+On the streamlit app access the *usage* tab  
+![streamlit_screenshot](media/imgs/streamlit_app.jpg)

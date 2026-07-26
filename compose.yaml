@@ -61,6 +61,8 @@ services:
       - OPENSEARCH_PASSWORD=Opensearch16admin#
     networks:
       - games
+    env_file:
+      - .env
 
 networks:
   games:

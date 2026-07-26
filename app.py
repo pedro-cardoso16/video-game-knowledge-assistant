@@ -15,7 +15,7 @@ OPENSEARCH_PASSWORD = os.getenv("OPENSEARCH_PASSWORD", "Opensearch16admin#")
 
 # --- Clients Setup ---
 @st.cache_resource
-def get_rag_client():
+def get_rag_client(model="gemini-3.1-flash-lite"):
     # Initialize OpenSearch client
     opensearch_client = OpenSearch(
         hosts=[{'host': OPENSEARCH_HOST, 'port': OPENSEARCH_PORT}],
@@ -26,16 +26,22 @@ def get_rag_client():
         ssl_show_warn=False,
     )
     # Initialize RAGClient from llm.py
-    return RAGClient(search_engine=opensearch_client)
+    return RAGClient(search_engine=opensearch_client, model=model)
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="Video Game Knowledge Assistant", page_icon="🎮")
 st.title("🎮 Video Game Knowledge Assistant")
 st.markdown("Ask me anything about video games! I'll use my search tools to find the most accurate information.")
 
+
+
+
 # Initialize session state for chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+if "gemini_history" not in st.session_state:
+    st.session_state.gemini_history = []
 
 # Display existing chat history
 for message in st.session_state.messages:
@@ -44,21 +50,30 @@ for message in st.session_state.messages:
 
 # Chat input
 if prompt := st.chat_input("What would you like to know about video games?"):
-    # Add user message to history
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Generate assistant response
     with st.chat_message("assistant"):
         with st.spinner("Searching and thinking..."):
             try:
                 rag_client = get_rag_client()
-                response = rag_client.rag(prompt)
+                response, st.session_state.gemini_history = rag_client.rag(
+                    prompt, history=st.session_state.gemini_history
+                )
                 st.markdown(response)
-                # Add assistant response to history
                 st.session_state.messages.append({"role": "assistant", "content": response})
             except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                print(tb)
                 error_msg = f"An error occurred: {str(e)}"
                 st.error(error_msg)
+                with st.expander("Debug traceback"):
+                    st.code(tb)
                 st.session_state.messages.append({"role": "assistant", "content": error_msg})
+
+if st.sidebar.button("🔄 New conversation"):
+    st.session_state.messages = []
+    st.session_state.gemini_history = []
+    st.rerun()

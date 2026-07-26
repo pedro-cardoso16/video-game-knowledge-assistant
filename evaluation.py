@@ -140,13 +140,11 @@ class Evaluator:
             host="localhost",
             port="5432",
         )
-    
+
     def chunked(self, iterable, size):
         it = list(iterable)
         for i in range(0, len(it), size):
-            yield it[i:i + size]
-
-    
+            yield it[i : i + size]
 
     def evaluate_agent(
         self,
@@ -200,7 +198,9 @@ class Evaluator:
                 with tqdm(total=len(questions_to_process), desc="Evaluating") as pbar:
                     for window in self.chunked(questions_to_process, window_size):
                         futures = {
-                            executor.submit(self._process_single_evaluation, x, judge, index): x
+                            executor.submit(
+                                self._process_single_evaluation, x, judge, index
+                            ): x
                             for x in window
                         }
 
@@ -253,7 +253,7 @@ class Evaluator:
         """Helper to evaluate a single question with retry logic."""
         try:
             # 1. Get Answer from RAG
-            answer = self.rag_client.rag(item["question"])
+            answer, _ = self.rag_client.rag(item["question"])
             context = self.rag_client.last_history
             reference_doc = self.rag_client.search(
                 index=index, query="", doc_id=item["doc_id"]
@@ -265,7 +265,11 @@ class Evaluator:
             #     if data in ("title", "name", "summary", "text")
             # ]
 
-            reference_doc_temp = {key:val for key, val in reference_doc["_source"].items() if key in ("title", "name", "summary", "text", "storyline")}
+            reference_doc_temp = {
+                key: val
+                for key, val in reference_doc["_source"].items()
+                if key in ("title", "name", "summary", "text", "storyline")
+            }
             reference_doc = reference_doc_temp
             # 2. Judge the answer
             retries = 0
@@ -283,7 +287,7 @@ class Evaluator:
                         config=dict(
                             system_instruction=EVALUATE_AGENT_INSTRUCTION,
                             response_mime_type="application/json",
-                            response_schema=EvaluationResult, # Ensure your judge client handles this
+                            response_schema=EvaluationResult,  # Ensure your judge client handles this
                         ),
                     )
 
@@ -294,7 +298,7 @@ class Evaluator:
 
                         judge.flush_usage_history()
                         self.rag_client.flush_usage_history()
-                        
+
                         return (
                             "judge",
                             item["question"],
@@ -387,6 +391,23 @@ class Evaluator:
 
         return pd.DataFrame(all_data)
 
+    def evaluate_search(
+        self,
+        index="igdb",
+        search_type: Literal["lexical", "hybrid", "semantic"] = "lexical",
+    ) -> tuple[float, float, pd.DataFrame]:
+        if self.ground_truth.empty:
+            raise ValueError("ground_truth is empty, must set a value")
+
+        index = cast(Literal["igdb", "wikipedia"], index)
+
+        return metrics.evaluate_search(
+            self.ground_truth,
+            lambda query: self.rag_client.search(
+                index=index, query=query, search_type=search_type
+            ),
+        )
+
 
 # class Evaluator:
 #     def __init__(self, rag_client: RAGClient, ground_truth: pd.DataFrame | None = None):
@@ -394,22 +415,6 @@ class Evaluator:
 #         if ground_truth is None:
 #             self.ground_truth: pd.DataFrame = pd.DataFrame()
 
-#     def evaluate_search(
-#         self,
-#         index="igdb",
-#         search_type: Literal["lexical", "hybrid", "semantic"] = "lexical",
-#     ) -> tuple[float, float, pd.DataFrame]:
-#         if self.ground_truth.empty:
-#             raise ValueError("ground_truth is empty, must set a value")
-
-#         index = cast(Literal["igdb", "wikipedia"], index)
-
-#         return metrics.evaluate_search(
-#             self.ground_truth,
-#             lambda query: self.rag_client.search(
-#                 index=index, query=query, search_type=search_type
-#             ),
-#         )
 
 #     def evaluate_agent(self, judge: RAGClient, overwrite: bool = False) -> None:
 #         """## Evaluate Agent

@@ -116,16 +116,177 @@ class RAGClient:
 
         return response
 
-    def rag(self, query: str) -> str:
+    # def rag(self, query: str) -> str:
+    #     """Retrieval Augmented Generation with Agentic Tool Use
+
+    #     Args:
+    #         query (str): query to search in the database and for llm to answer
+    #     """
+    #     # Initialize conversation history
+    #     history: types.ContentListUnionDict = [
+    #         types.Content(role="user", parts=[types.Part.from_text(text=query)])
+    #     ]
+
+    #     max_turns = 5
+    #     max_retries = 5
+    #     turn = 0
+
+    #     while turn < max_turns:
+    #         retries = 0
+    #         response = None
+    #         while retries < max_retries:
+    #             try:
+    #                 # Call the LLM with the full history
+    #                 response = self.__client.models.generate_content(
+    #                     model=self.__model,
+    #                     contents=history,
+    #                     config=types.GenerateContentConfig(
+    #                         system_instruction=INSTRUCTION,
+    #                         tools=[opensearch_search],
+    #                         tool_config=types.ToolConfig(
+    #                             function_calling_config=types.FunctionCallingConfig(
+    #                                 # Initial call forces tool use; subsequent calls are AUTO
+    #                                 mode=(
+    #                                     types.FunctionCallingConfigMode.ANY
+    #                                     if turn == 0
+    #                                     else types.FunctionCallingConfigMode.AUTO
+    #                                 ),
+    #                             ),
+    #                         ),
+    #                     ),
+    #                 )
+
+    #                 self.usage_history.append(response.usage_metadata)
+    #                 break
+
+    #             except APIError as e:
+    #                 if "429" in str(e):
+    #                     retries += 1
+    #                     wait_time = (2**retries) * 10 + random.random()
+    #                     print(f"Quota exceeded (429). Retrying in {wait_time:.2f} seconds...")
+    #                     time.sleep(wait_time)
+    #                     continue
+    #                 raise e
+
+    #         print("Successfully retrieved the content.")
+    #         # Extract text parts manually to avoid the 'non-text parts' warning from .text property
+    #         text_parts = [
+    #             p.text for p in response.candidates[0].content.parts if p.text
+    #         ]
+
+    #         # If the model provides a final text answer AND no tool calls, we are done
+    #         if text_parts and not response.function_calls:
+    #             # Add the final response to history for completeness
+    #             history.append(
+    #                 types.Content(
+    #                     role="model", parts=response.candidates[0].content.parts
+    #                 )
+    #             )
+
+    #             self.last_history = history
+    #             return "\n".join(text_parts)
+
+    #         # Otherwise, the model wants to call tools
+    #         # We must add the model's tool call response to history before responding to it
+    #         history.append(
+    #             types.Content(role="model", parts=response.candidates[0].content.parts)
+    #         )
+
+    #         func_calls = response.function_calls
+    #         if not func_calls:
+    #             break
+
+    #         # Process all tool calls in the current turn (Parallel Tool Calling)
+    #         tool_responses = []
+    #         for call in func_calls:
+    #             args = call.args
+    #             name = call.name
+
+    #             if name == "opensearch_search":
+    #                 # Sanitize and limit arguments to prevent quota exhaustion
+    #                 safe_args = (args or {}).copy()
+    #                 safe_args["num"] = min(safe_args.get("num", 3), 3)
+
+    #                 results = self.search(**safe_args)
+
+    #                 # Clean results: OpenSearch returns a dict with hits -> hits.
+    #                 # We must extract _source and ignore vectors.
+    #                 cleaned_results = []
+
+    #                 # Handle OpenSearch response structure
+    #                 hits = []
+    #                 if isinstance(results, dict) and "hits" in results:
+    #                     hits = results["hits"].get("hits", [])
+    #                 elif isinstance(results, list):
+    #                     hits = results
+
+    #                 for hit in hits:
+    #                     # Get the actual document source
+    #                     source = (
+    #                         hit.get("_source", hit) if isinstance(hit, dict) else hit
+    #                     )
+
+    #                     if isinstance(source, dict):
+    #                         # Filter out the vector fields and technical metadata to get the actual content
+    #                         # We exclude any field containing 'vector' or 'embedding' to be generic
+    #                         content_fields = [
+    #                             f"{k}: {v}"
+    #                             for k, v in source.items()
+    #                             if not any(
+    #                                 bad in k.lower()
+    #                                 for bad in ["vector", "embedding", "id"]
+    #                             )
+    #                         ]
+
+    #                         text_val = ", ".join(content_fields)
+    #                         cleaned_results.append(
+    #                             text_val[:1000] if text_val else "Empty document"
+    #                         )
+    #                     else:
+    #                         cleaned_results.append(str(source)[:1000])
+
+    #                 if not cleaned_results:
+    #                     cleaned_results = ["No relevant information found."]
+
+    #                 tool_responses.append(
+    #                     types.Part.from_function_response(
+    #                         name=name,
+    #                         response={"result": cleaned_results},
+    #                     )
+    #                 )
+    #             else:
+    #                 tool_responses.append(
+    #                     types.Part.from_function_response(
+    #                         name=name or "Unknown",
+    #                         response={"error": f"Unknown tool {name}"},
+    #                     )
+    #                 )
+
+    #         # Add all tool results as a single 'tool' role entry in history
+    #         history.append(types.Content(role="tool", parts=tool_responses))
+
+    #         turn += 1
+    #         time.sleep(10)
+
+    #     return "I'm sorry, I was unable to find a final answer after the maximum number of turns."
+
+    def rag(self, query: str, history: list | None = None) -> tuple[str, list]:
         """Retrieval Augmented Generation with Agentic Tool Use
 
         Args:
             query (str): query to search in the database and for llm to answer
+            history (list | None): prior conversation turns (Gemini Content objects).
+                Pass None to start a fresh conversation.
+
+        Returns:
+            (answer, updated_history) so the caller can persist it for the next turn.
         """
-        # Initialize conversation history
-        history: types.ContentListUnionDict = [
+        if history is None:
+            history: types.ContentListUnionDict = []
+
+        history.append(
             types.Content(role="user", parts=[types.Part.from_text(text=query)])
-        ]
+        )
 
         max_turns = 5
         max_retries = 5
@@ -134,9 +295,8 @@ class RAGClient:
         while turn < max_turns:
             retries = 0
             response = None
-            while retries < max_retries: 
+            while retries < max_retries:
                 try:
-                    # Call the LLM with the full history
                     response = self.__client.models.generate_content(
                         model=self.__model,
                         contents=history,
@@ -145,7 +305,6 @@ class RAGClient:
                             tools=[opensearch_search],
                             tool_config=types.ToolConfig(
                                 function_calling_config=types.FunctionCallingConfig(
-                                    # Initial call forces tool use; subsequent calls are AUTO
                                     mode=(
                                         types.FunctionCallingConfigMode.ANY
                                         if turn == 0
@@ -155,39 +314,33 @@ class RAGClient:
                             ),
                         ),
                     )
-
                     self.usage_history.append(response.usage_metadata)
                     break
-
                 except APIError as e:
                     if "429" in str(e):
                         retries += 1
                         wait_time = (2**retries) * 10 + random.random()
-                        print(f"Quota exceeded (429). Retrying in {wait_time:.2f} seconds...")
+                        print(
+                            f"Quota exceeded (429). Retrying in {wait_time:.2f} seconds..."
+                        )
                         time.sleep(wait_time)
                         continue
                     raise e
 
             print("Successfully retrieved the content.")
-            # Extract text parts manually to avoid the 'non-text parts' warning from .text property
             text_parts = [
                 p.text for p in response.candidates[0].content.parts if p.text
             ]
 
-            # If the model provides a final text answer AND no tool calls, we are done
             if text_parts and not response.function_calls:
-                # Add the final response to history for completeness
                 history.append(
                     types.Content(
                         role="model", parts=response.candidates[0].content.parts
                     )
                 )
-
                 self.last_history = history
-                return "\n".join(text_parts)
+                return "\n".join(text_parts), history
 
-            # Otherwise, the model wants to call tools
-            # We must add the model's tool call response to history before responding to it
             history.append(
                 types.Content(role="model", parts=response.candidates[0].content.parts)
             )
@@ -196,24 +349,17 @@ class RAGClient:
             if not func_calls:
                 break
 
-            # Process all tool calls in the current turn (Parallel Tool Calling)
             tool_responses = []
             for call in func_calls:
                 args = call.args
                 name = call.name
 
                 if name == "opensearch_search":
-                    # Sanitize and limit arguments to prevent quota exhaustion
                     safe_args = (args or {}).copy()
                     safe_args["num"] = min(safe_args.get("num", 3), 3)
-
                     results = self.search(**safe_args)
 
-                    # Clean results: OpenSearch returns a dict with hits -> hits.
-                    # We must extract _source and ignore vectors.
                     cleaned_results = []
-
-                    # Handle OpenSearch response structure
                     hits = []
                     if isinstance(results, dict) and "hits" in results:
                         hits = results["hits"].get("hits", [])
@@ -221,14 +367,10 @@ class RAGClient:
                         hits = results
 
                     for hit in hits:
-                        # Get the actual document source
                         source = (
                             hit.get("_source", hit) if isinstance(hit, dict) else hit
                         )
-
                         if isinstance(source, dict):
-                            # Filter out the vector fields and technical metadata to get the actual content
-                            # We exclude any field containing 'vector' or 'embedding' to be generic
                             content_fields = [
                                 f"{k}: {v}"
                                 for k, v in source.items()
@@ -237,7 +379,6 @@ class RAGClient:
                                     for bad in ["vector", "embedding", "id"]
                                 )
                             ]
-
                             text_val = ", ".join(content_fields)
                             cleaned_results.append(
                                 text_val[:1000] if text_val else "Empty document"
@@ -262,13 +403,14 @@ class RAGClient:
                         )
                     )
 
-            # Add all tool results as a single 'tool' role entry in history
             history.append(types.Content(role="tool", parts=tool_responses))
-
             turn += 1
             time.sleep(10)
 
-        return "I'm sorry, I was unable to find a final answer after the maximum number of turns."
+        return (
+            "I'm sorry, I was unable to find a final answer after the maximum number of turns.",
+            history,
+        )
 
     def search(
         self,

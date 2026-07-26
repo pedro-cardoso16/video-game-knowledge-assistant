@@ -14,6 +14,9 @@ import os
 import requests
 import json
 import pandas as pd
+import psycopg as pg
+
+from google.genai.types import GenerateContentResponseUsageMetadata
 
 from opensearchpy import OpenSearch
 from opensearchpy.helpers import bulk
@@ -64,7 +67,7 @@ class IGDB:
             "Authorization": f"Bearer {info["access_token"]}",
         }
 
-    def pull_all(
+    def download(
         self,
         max_workers: int = 16,
         index: str | None = None,
@@ -136,11 +139,11 @@ class IGDB:
             timeout=10,
         )
 
-    def ingest(self, content: dict, index_name):
+    def ingest(self, content: dict, index):
         doc_id = content["id"]
         content.pop("id")
-        opensearch_client.index(index=index_name, body=content, id=doc_id)
-        opensearch_client.indices.refresh(index=index_name)
+        opensearch_client.index(index=index, body=content, id=doc_id)
+        opensearch_client.indices.refresh(index=index)
 
 
 body = "fields *; where id >= 1 & id <= 500; sort id asc; limit 500;"
@@ -218,7 +221,7 @@ class Wikipedia:
         self.opensearch_client = opensearch_client
         pass
 
-    def download_wikipedia(
+    def download(
         self,
         index: str = "wikipedia",
         model_id: str | None = None,
@@ -327,6 +330,95 @@ class Wikipedia:
         f.close()
 
 
+MODEL_PRICING = {
+    "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.50},
+    "gemini-3.5-flash-lite": {"input": 0.30, "output": 2.50},
+    "gemma-4-31b-it": {"input": 0.0, "output": 0.0},  # Gemma has no paid tier
+}
+
+
+def ingest_usage(
+    usage_metadata: GenerateContentResponseUsageMetadata | None,
+    conn: pg.Connection | None,
+    model: str,
+) -> None:
+    if usage_metadata is None:
+        return
+
+    if conn is None:
+        conn = pg.connect(
+            dbname="usage",
+            user="user",
+            password="postgres",
+            host="localhost",
+            port="5432",
+        )
+
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS usage (
+            id SERIAL PRIMARY KEY,
+            source TEXT,
+            model TEXT,
+            prompt_token_count INTEGER,
+            candidates_token_count INTEGER,
+            total_token_count INTEGER,
+            cached_content_token_count INTEGER,
+            thoughts_token_count INTEGER,
+            cost_usd NUMERIC(12, 8),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """.strip())
+
+    cost = estimate_cost(model, usage_metadata)
+
+    cursor.execute(
+        """
+        INSERT INTO usage (
+        source, 
+        model, 
+        prompt_token_count, 
+        candidates_token_count,
+        total_token_count, 
+        cached_content_token_count, 
+        thoughts_token_count,
+        cost_usd
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """.strip(),
+        ("rag", model, *extract_usage_row(usage_metadata), cost),
+    )
+
+
+def estimate_cost(model: str, usage_metadata) -> float:
+    """Estimate USD cost for a single response. Returns 0.0 for unknown models."""
+    pricing = MODEL_PRICING.get(model)
+    if pricing is None:
+        return 0.0
+
+    input_tokens = usage_metadata.prompt_token_count or 0
+    output_tokens = usage_metadata.candidates_token_count or 0
+
+    cost = (input_tokens / 1_000_000) * pricing["input"] + (
+        output_tokens / 1_000_000
+    ) * pricing["output"]
+    return cost
+
+
+def extract_usage_row(
+    usage_metadata: GenerateContentResponseUsageMetadata | None,
+) -> tuple:
+    if usage_metadata is None:
+        return (0, 0, 0, 0, 0)
+    return (
+        usage_metadata.prompt_token_count or 0,
+        usage_metadata.candidates_token_count or 0,
+        usage_metadata.total_token_count or 0,
+        usage_metadata.cached_content_token_count or 0,
+        usage_metadata.thoughts_token_count or 0,
+    )
+
+
 if __name__ == "__main__":
     # print(get_models(opensearch_client))
 
@@ -351,7 +443,7 @@ if __name__ == "__main__":
 
     # igdb = IGDB(opensearch_client)
     # igdb.pull_all(index="igdb", model_id=model_id)
-    # wikipedia = Wikipedia(opensearch_client)
+    wikipedia = Wikipedia(opensearch_client)
     # wikipedia.download_wikipedia(index="wikipedia", model_id=model_id, file_path="data/wikipedia.jsonl")
 
     # wikipedia.download_wikipedia(file_path="data/wikipedia.jsonl")
@@ -366,6 +458,21 @@ if __name__ == "__main__":
     rag_client = RAGClient(opensearch_client, model)
     evaluator = Evaluator(rag_client, None)
 
+    # response = opensearch_client.search(
+    #     index="wikipedia",
+    #     body={
+    #         "size": 10000,
+    #         "query": {"match_all": {}},
+    #     },
+    # )
+
+    # ids = [r["_id"] for r in response["hits"]["hits"]]
+
+    # print("74599251" in ids)
+
+    # evaluator.generate_ground_truth(
+    #     index="wikipedia", count=3, n=20, file_path="data/wikipedia_ground_truth.csv"
+    # )
     # wikipedia_ground_truth = evaluator.generate_ground_truth(
     #     "wikipedia", 3, 300, "data/wikipedia_ground_truth.csv"
     # )
@@ -374,17 +481,24 @@ if __name__ == "__main__":
     #     "igdb", 3, 300, "data/igdb_ground_truth.csv"
     # )
 
+    # result = rag_client.search(index="wikipedia", query="", doc_id="785")
+
+    # print(result)
+
     # evaluator.ground_truth = pd.read_csv("data/wikipedia_ground_truth.csv")
+
     # hr_score, mrr_score, x = evaluator.evaluate_search(index="wikipedia",search_type="hybrid")
     # print(hr_score, mrr_score, x, sep="\n\n")
 
-    evaluator.ground_truth = pd.read_csv("data/igdb_ground_truth.csv")
     judge = RAGClient(opensearch_client, model=model)
-    evaluator.evaluate_agent(judge, overwrite=False, max_workers=1, index="igdb")
+
+    # evaluator.ground_truth = pd.read_csv("data/igdb_ground_truth.csv")
+    # evaluator.evaluate_agent(judge, overwrite=False, max_workers=1, index="igdb")
 
     evaluator.ground_truth = pd.read_csv("data/wikipedia_ground_truth.csv")
     evaluator.evaluate_agent(judge, overwrite=False, max_workers=1, index="wikipedia")
 
+    # print(result)
     # Boosting optimization
 
     # print(hr_score, mrr_score, x)

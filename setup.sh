@@ -2,14 +2,23 @@
 
 FILE_NAME=".env"
 
-FILE_TEMPLATE="GEMINI_API_KEY=<your_api_key>
-OPENAI_API_KEY=<your_api_key>
+FILE_TEMPLATE="# --- Gemini ---
+GEMINI_API_KEY=<your_api_key>
 
-# Only fill this one if you intend to ingest IGDB data yourslef.
+# --- IGDB ---
+# Only fill these ones if you intend to ingest IGDB data yourslef.
 IGDB_CLIENT_ID=<optional_api_key> 
+IGDB_CLIENT_SECRET=<optional_client_secret>
 
+# Do not change the fields below
+
+# --- Postgres ---
 POSTGRES_PASSWORD=postgres
-POSTGRES_USER=user"
+POSTGRES_USER=user
+
+# --- Opensearch ---
+OPENSEARCH_USER=admin
+OPENSEARCH_PASSWORD=Opensearch16admin#"
 
 if [ -f "${FILE_NAME}" ]; then
     read -p "File $FILE_NAME already exists. Overwrite? (y/N): " response
