@@ -1,6 +1,13 @@
 <!-- [![GitHub Sponsors](https://img.shields.io/badge/Sponsor_me-EA4AAA?style=for-the-badge&logo=github-sponsors&logoColor=white)](https://github.com/sponsors/pedro-cardoso16)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-orange?style=for-the-badge&logo=buy-me-a-coffee&logoColor=white)](https://www.buymeacoffee.com/pedro.cardoso) -->
 
+![Python](https://img.shields.io/badge/python-3.12-blue)
+![Streamlit](https://img.shields.io/badge/Streamlit-1.59-ff69b4)
+![OpenSearch](https://img.shields.io/badge/OpenSearch-3.2-orange)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-blue)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)
+![License](https://img.shields.io/badge/license-MIT-green)
+
 ## Acknowledgments
 This project was developed as part of the LLM Zoomcamp cohort leaded by instructor [@alexeygrigorev](https://github.com/alexeygrigorev).
 Special thanks to the [DataTalksClub/llm-zoomcamp](https://github.com/DataTalksClub/llm-zoomcamp) community for providing the resources and framework for this project.
