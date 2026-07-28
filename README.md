@@ -1,11 +1,11 @@
 <!-- [![GitHub Sponsors](https://img.shields.io/badge/Sponsor_me-EA4AAA?style=for-the-badge&logo=github-sponsors&logoColor=white)](https://github.com/sponsors/pedro-cardoso16)
 [![Buy Me a Coffee](https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/pedro.cardoso) -->
 
-![Python](https://img.shields.io/badge/python-3.12-blue)
-![Streamlit](https://img.shields.io/badge/Streamlit-1.59-ff69b4)
-![OpenSearch](https://img.shields.io/badge/OpenSearch-3.2-orange)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-blue)
-![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)
+![Python](https://img.shields.io/badge/python-3.12-blue?logo=python)
+![Streamlit](https://img.shields.io/badge/Streamlit-1.59-red?logo=streamlit)
+![OpenSearch](https://img.shields.io/badge/OpenSearch-3.2-green?logo=opensearch)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-blue?logo=postgresql)
+![Docker](https://img.shields.io/badge/Docker-Compose-blue?logo=docker)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Acknowledgments
