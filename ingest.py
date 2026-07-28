@@ -15,10 +15,14 @@ import requests
 import json
 import pandas as pd
 import psycopg as pg
+import streamlit as st
+import json
+from opensearchpy import OpenSearch, helpers
+import subprocess
+import os
 
 from google.genai.types import GenerateContentResponseUsageMetadata
 
-from opensearchpy import OpenSearch
 from opensearchpy.helpers import bulk
 from opensearch_utils import create_index_with_semantic_search, get_models
 
@@ -337,11 +341,19 @@ MODEL_PRICING = {
 }
 
 
-def ingest_usage(
+def save_usage_metadata(
     usage_metadata: GenerateContentResponseUsageMetadata | None,
     conn: pg.Connection | None,
     model: str,
 ) -> None:
+    """### Ingest usage
+
+    Args:
+        usage_metadata (GenerateContentResponseUsageMetadata | None): metadata
+            of the usage from the last query
+        conn (Connection | None): connection to postgres server
+        model (str): model's name
+    """
     if usage_metadata is None:
         return
 
@@ -354,40 +366,41 @@ def ingest_usage(
             port="5432",
         )
 
-    cursor = conn.cursor()
+    with conn:
+        with conn.cursor() as cursor:
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS usage (
-            id SERIAL PRIMARY KEY,
-            source TEXT,
-            model TEXT,
-            prompt_token_count INTEGER,
-            candidates_token_count INTEGER,
-            total_token_count INTEGER,
-            cached_content_token_count INTEGER,
-            thoughts_token_count INTEGER,
-            cost_usd NUMERIC(12, 8),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """.strip())
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS usage (
+                    id SERIAL PRIMARY KEY,
+                    source TEXT,
+                    model TEXT,
+                    prompt_token_count INTEGER,
+                    candidates_token_count INTEGER,
+                    total_token_count INTEGER,
+                    cached_content_token_count INTEGER,
+                    thoughts_token_count INTEGER,
+                    cost_usd NUMERIC(12, 8),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """.strip())
 
-    cost = estimate_cost(model, usage_metadata)
+            cost = estimate_cost(model, usage_metadata)
 
-    cursor.execute(
-        """
-        INSERT INTO usage (
-        source, 
-        model, 
-        prompt_token_count, 
-        candidates_token_count,
-        total_token_count, 
-        cached_content_token_count, 
-        thoughts_token_count,
-        cost_usd
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """.strip(),
-        ("rag", model, *extract_usage_row(usage_metadata), cost),
-    )
+            cursor.execute(
+                """
+                INSERT INTO usage (
+                source, 
+                model, 
+                prompt_token_count, 
+                candidates_token_count,
+                total_token_count, 
+                cached_content_token_count, 
+                thoughts_token_count,
+                cost_usd
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """.strip(),
+                ("rag", model, *extract_usage_row(usage_metadata), cost),
+            )
 
 
 def estimate_cost(model: str, usage_metadata) -> float:
@@ -417,6 +430,177 @@ def extract_usage_row(
         usage_metadata.cached_content_token_count or 0,
         usage_metadata.thoughts_token_count or 0,
     )
+
+
+def save_user_feedback(
+    conn: pg.Connection, question: str, answer: str, score: str
+) -> None:
+    """Save a user's thumbs up/down review for an assistant answer."""
+    with conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS evaluations (
+                    id SERIAL PRIMARY KEY,
+                    source TEXT,
+                    question TEXT,
+                    answer TEXT,
+                    reasoning TEXT,
+                    answer_score TEXT,
+                    tool_score TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute(
+                """
+                INSERT INTO evaluations (source, question, answer, answer_score)
+                VALUES (%s, %s, %s, %s)
+                """,
+                ("user", question, answer, score),
+            )
+
+
+class OpenSearchBundler:
+    def __init__(self, client: OpenSearch):
+        self.client = client
+
+    def export_index(self, index: str, data_file: str, config_file: str):
+        """Exports index settings, mappings, and all documents.
+
+        Args:
+            index (str): Name of the index to export.
+            data_file (str): Path to save the documents in .jsonl format.
+            config_file (str): Path to save the metadata (settings and mappings) in .json format.
+        """
+        print(f"📦 Exporting index: {index}...")
+
+        # 1. Export Settings and Mappings to a single JSON file
+        settings = self.client.indices.get_settings(index=index)
+        mappings = self.client.indices.get_mapping(index=index)
+
+        config = {"settings": settings[index], "mappings": mappings[index]}
+
+        with open(config_file, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=4)
+        print(f"✅ Metadata saved to {config_file}")
+
+        # 2. Export Documents to JSONL (JSON Lines)
+        # Use Scroll API to handle indices larger than 10k docs
+        query = {"query": {"match_all": {}}}
+        page = self.client.search(index=index, body=query, scroll="2m", size=1000)
+
+        scroll_id = page["_scroll_id"]
+        hits = page["hits"]["hits"]
+        count = 0
+
+        with open(data_file, "w", encoding="utf-8") as f:
+            while len(hits) > 0:
+                for hit in hits:
+                    doc = hit["_source"]
+                    # Store the ID inside the document so we can restore it exactly
+                    doc["_id"] = hit["_id"]
+                    f.write(json.dumps(doc) + "\n")
+                    count += 1
+
+                # Get the next batch of documents
+                page = self.client.scroll(scroll_id=scroll_id, scroll="2m")
+                scroll_id = page["_scroll_id"]
+                hits = page["hits"]["hits"]
+
+        print(f"✅ {count} documents saved to {data_file}")
+
+    def import_index(self, data_file: str, config_file: str, new_index_name: str):
+        """Recreates the index and loads data from JSONL.
+
+        Args:
+            data_file (str): Path to the .jsonl file containing documents.
+            config_file (str): Path to the .json file containing index settings and mappings.
+            new_index_name (str): Name of the new index to be created.
+        """
+        print(f"🚀 Importing index into: {new_index_name}...")
+
+        # 1. Load Configuration
+        with open(config_file, "r", encoding="utf-8") as f:
+            config = json.load(f)
+
+        # 2. Sanitize and Create Index
+        # We must remove cluster-specific IDs (UUIDs) or the import will fail
+        settings = config["settings"].get("settings", {})
+        for key in [
+            "index.uuid",
+            "index.creation_date",
+            "index.version",
+            "index.provided_name",
+        ]:
+            settings.pop(key, None)
+
+        self.client.indices.create(
+            index=new_index_name,
+            body={"settings": settings, "mappings": config["mappings"]},
+        )
+        print(f"✅ Index {new_index_name} created.")
+
+        # 3. Bulk Import from JSONL
+        def jsonl_generator():
+            with open(data_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    doc = json.loads(line)
+                    doc_id = doc.pop("_id", None)
+                    yield {"_index": new_index_name, "_id": doc_id, "_source": doc}
+
+        success, failed = helpers.bulk(self.client, jsonl_generator())
+        print(f"✅ Successfully imported {success} documents. Failures: {failed}")
+
+
+class PostgresBundler:
+    def __init__(self, container_name="postgres", user="user", password="postgres"):
+        self.container_name = container_name
+        self.user = user
+        self.password = password
+
+    def export_database(self, db_name: str, output_file: str):
+        """Exports a database using pg_dump via docker exec.
+
+        Args:
+            db_name (str): Name of the database (e.g., 'usage' or 'evaluations').
+            output_file (str): Path to save the .sql file.
+        """
+        print(f"📦 Exporting database {db_name}...")
+
+        # We set the PGPASSWORD environment variable so pg_dump doesn't ask for a password
+        # The command is executed INSIDE the docker container and streamed to a local file
+        cmd = f"docker exec -e PGPASSWORD={self.password} {self.container_name} pg_dump -U {self.user} {db_name}"
+
+        try:
+            with open(output_file, "w") as f:
+                subprocess.run(cmd, shell=True, stdout=f, check=True)
+            print(f"✅ Database {db_name} saved to {output_file}")
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Export failed: {e}")
+
+    def import_database(self, sql_file: str, db_name: str):
+        """
+        Imports a .sql file into a database via docker exec.
+        """
+        print(f"🚀 Importing {sql_file} into database {db_name}...")
+
+        # 1. First, ensure the database exists (similar to your init-db.sh logic)
+        create_db_cmd = f'docker exec -e PGPASSWORD={self.password} {self.container_name} psql -U {self.user} -d postgres -c "CREATE DATABASE {db_name};"'
+
+        try:
+            # We ignore errors here in case the database already exists
+            subprocess.run(create_db_cmd, shell=True, capture_output=True)
+        except Exception:
+            pass
+
+        # 2. Stream the .sql file into the psql tool inside the container
+        try:
+            with open(sql_file, "r") as f:
+                # We pipe the file content into the psql command
+                cmd = f"docker exec -i -e PGPASSWORD={self.password} {self.container_name} psql -U {self.user} -d {db_name}"
+                subprocess.run(cmd, shell=True, stdin=f, check=True)
+            print(f"✅ Database {db_name} restored successfully.")
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Import failed: {e}")
 
 
 if __name__ == "__main__":
@@ -451,8 +635,8 @@ if __name__ == "__main__":
     from evaluation import Evaluator
     from llm import RAGClient
 
-    model = "gemini-3.1-flash-lite"
     model = "gemini-3.5-flash-lite"
+    model = "gemini-3.1-flash-lite"
     model = "gemma-4-31b-it"
 
     rag_client = RAGClient(opensearch_client, model)
@@ -490,14 +674,17 @@ if __name__ == "__main__":
     # hr_score, mrr_score, x = evaluator.evaluate_search(index="wikipedia",search_type="hybrid")
     # print(hr_score, mrr_score, x, sep="\n\n")
 
-    judge = RAGClient(opensearch_client, model=model)
+    # judge = RAGClient(opensearch_client, model=model)
 
-    # evaluator.ground_truth = pd.read_csv("data/igdb_ground_truth.csv")
-    # evaluator.evaluate_agent(judge, overwrite=False, max_workers=1, index="igdb")
+    # # evaluator.ground_truth = pd.read_csv("data/igdb_ground_truth.csv")
+    # # evaluator.evaluate_agent(judge, overwrite=False, max_workers=1, index="igdb")
 
-    evaluator.ground_truth = pd.read_csv("data/wikipedia_ground_truth.csv")
-    evaluator.evaluate_agent(judge, overwrite=False, max_workers=1, index="wikipedia")
+    # evaluator.ground_truth = pd.read_csv("data/wikipedia_ground_truth.csv")
+    # evaluator.evaluate_agent(judge, overwrite=False, max_workers=1, index="wikipedia")
 
+    rag_client.rag("Tell me about the game Dark Souls")
+
+    save_usage_metadata(rag_client.usage_history[-1], None, model=model)
     # print(result)
     # Boosting optimization
 

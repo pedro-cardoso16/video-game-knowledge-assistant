@@ -1,6 +1,7 @@
 import pydantic
 import time
 import random
+from ingest import save_usage_metadata
 from opensearch_utils import search
 from opensearchpy import OpenSearch
 from google.genai import Client
@@ -288,7 +289,7 @@ class RAGClient:
             types.Content(role="user", parts=[types.Part.from_text(text=query)])
         )
 
-        max_turns = 5
+        max_turns = 10
         max_retries = 5
         turn = 0
 
@@ -314,8 +315,10 @@ class RAGClient:
                             ),
                         ),
                     )
+                    
                     self.usage_history.append(response.usage_metadata)
                     break
+
                 except APIError as e:
                     if "429" in str(e):
                         retries += 1

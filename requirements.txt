@@ -2,7 +2,7 @@ datasets==5.0.0
 opensearch_py==3.2.0
 pandas==3.0.5
 protobuf==7.35.1
-psycopg==3.3.4
+psycopg[binary,pool]==3.3.4
 pydantic==2.13.4
 python-dotenv==1.2.2
 Requests==2.34.2
