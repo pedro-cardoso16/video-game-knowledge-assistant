@@ -6,3 +6,16 @@ __pycache__/
 *.jsonl
 *.csv
 main.ipynb
+
+# Exceptions
+# !data/evaluations.sql
+# !data/usage.sql
+
+# !data/igdb_index.jsonl
+# !data/igdb_config.json
+
+# !data/wikipedia_index.jsonl
+# !data/wikipedia_config.json
+
+# !data/wikipedia_ground_truth.csv
+# !data/igdb_ground_truth.csv

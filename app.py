@@ -68,21 +68,24 @@ def load_usage_data():
         WHERE created_at >= NOW() - INTERVAL '30 days'
         ORDER BY 1
     """
-    rows: list
-    columns: list
+    
+    try:
+        with get_usage_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(query)
+                rows = cursor.fetchall()
 
-    with get_usage_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(query)
-            rows = cursor.fetchall()
+                if cursor.description is None:
+                    return pd.DataFrame() # Return empty DF if no description
 
-            if cursor.description is None:
-                return None
-
-            columns = [desc[0] for desc in cursor.description]
-
-    return pd.DataFrame(rows, columns=columns)
-
+                columns = [desc[0] for desc in cursor.description]
+                return pd.DataFrame(rows, columns=columns)
+    except pg.errors.UndefinedTable:
+        # This happens the very first time the app is run before any queries are made
+        return pd.DataFrame() 
+    except Exception as e:
+        st.error(f"Database error: {e}")
+        return pd.DataFrame()
 
 @st.cache_data(ttl=600)
 def load_feedback_data():
@@ -92,15 +95,20 @@ def load_feedback_data():
         WHERE source = 'user'
         ORDER BY created_at
     """
-    with get_eval_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(query)
-            rows = cursor.fetchall()
-            if cursor.description is None:
-                return None
-            columns = [desc[0] for desc in cursor.description]
-    return pd.DataFrame(rows, columns=columns)
-
+    try:
+        with get_eval_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(query)
+                rows = cursor.fetchall()
+                if cursor.description is None:
+                    return pd.DataFrame()
+                columns = [desc[0] for desc in cursor.description]
+        return pd.DataFrame(rows, columns=columns)
+    except pg.errors.UndefinedTable:
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Database error: {e}")
+        return pd.DataFrame()
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="Video Game Knowledge Assistant", page_icon="🎮")

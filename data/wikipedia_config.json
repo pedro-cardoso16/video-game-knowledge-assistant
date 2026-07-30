@@ -1,0 +1,66 @@
+{
+    "settings": {
+        "settings": {
+            "index": {
+                "replication": {
+                    "type": "DOCUMENT"
+                },
+                "search": {
+                    "default_pipeline": "search_pipeline"
+                },
+                "number_of_shards": "1",
+                "provided_name": "wikipedia",
+                "default_pipeline": "wikipedia_ingest_pipeline",
+                "knn": "true",
+                "creation_date": "1784839847085",
+                "number_of_replicas": "1",
+                "uuid": "iE83DMDsRTOVSL0y2eQ5OA",
+                "version": {
+                    "created": "136408427"
+                }
+            }
+        }
+    },
+    "mappings": {
+        "mappings": {
+            "dynamic": "true",
+            "properties": {
+                "text": {
+                    "type": "text"
+                },
+                "text_vector": {
+                    "type": "knn_vector",
+                    "dimension": 384,
+                    "method": {
+                        "engine": "lucene",
+                        "space_type": "cosinesimil",
+                        "name": "hnsw",
+                        "parameters": {}
+                    }
+                },
+                "title": {
+                    "type": "text"
+                },
+                "title_vector": {
+                    "type": "knn_vector",
+                    "dimension": 384,
+                    "method": {
+                        "engine": "lucene",
+                        "space_type": "cosinesimil",
+                        "name": "hnsw",
+                        "parameters": {}
+                    }
+                },
+                "url": {
+                    "type": "text",
+                    "fields": {
+                        "keyword": {
+                            "type": "keyword",
+                            "ignore_above": 256
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

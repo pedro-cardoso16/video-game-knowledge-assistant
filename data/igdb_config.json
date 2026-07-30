@@ -1,0 +1,253 @@
+{
+    "settings": {
+        "settings": {
+            "index": {
+                "replication": {
+                    "type": "DOCUMENT"
+                },
+                "search": {
+                    "default_pipeline": "search_pipeline"
+                },
+                "number_of_shards": "1",
+                "provided_name": "igdb",
+                "default_pipeline": "igdb_ingest_pipeline",
+                "knn": "true",
+                "creation_date": "1784836489573",
+                "number_of_replicas": "1",
+                "uuid": "m03nrKMAShK9N3mNlsZ00A",
+                "version": {
+                    "created": "136408427"
+                }
+            }
+        }
+    },
+    "mappings": {
+        "mappings": {
+            "dynamic": "true",
+            "properties": {
+                "age_ratings": {
+                    "type": "long"
+                },
+                "aggregated_rating": {
+                    "type": "float"
+                },
+                "aggregated_rating_count": {
+                    "type": "long"
+                },
+                "alternative_names": {
+                    "type": "long"
+                },
+                "artworks": {
+                    "type": "long"
+                },
+                "bundles": {
+                    "type": "long"
+                },
+                "checksum": {
+                    "type": "text",
+                    "fields": {
+                        "keyword": {
+                            "type": "keyword",
+                            "ignore_above": 256
+                        }
+                    }
+                },
+                "collections": {
+                    "type": "long"
+                },
+                "cover": {
+                    "type": "long"
+                },
+                "created_at": {
+                    "type": "long"
+                },
+                "dlcs": {
+                    "type": "long"
+                },
+                "expanded_games": {
+                    "type": "long"
+                },
+                "expansions": {
+                    "type": "long"
+                },
+                "external_games": {
+                    "type": "long"
+                },
+                "first_release_date": {
+                    "type": "long"
+                },
+                "forks": {
+                    "type": "long"
+                },
+                "franchise": {
+                    "type": "long"
+                },
+                "franchises": {
+                    "type": "long"
+                },
+                "game_engines": {
+                    "type": "long"
+                },
+                "game_localizations": {
+                    "type": "long"
+                },
+                "game_modes": {
+                    "type": "long"
+                },
+                "game_status": {
+                    "type": "long"
+                },
+                "game_type": {
+                    "type": "long"
+                },
+                "genres": {
+                    "type": "long"
+                },
+                "hypes": {
+                    "type": "long"
+                },
+                "involved_companies": {
+                    "type": "long"
+                },
+                "keywords": {
+                    "type": "long"
+                },
+                "language_supports": {
+                    "type": "long"
+                },
+                "multiplayer_modes": {
+                    "type": "long"
+                },
+                "name": {
+                    "type": "text"
+                },
+                "name_vector": {
+                    "type": "knn_vector",
+                    "dimension": 384,
+                    "method": {
+                        "engine": "lucene",
+                        "space_type": "cosinesimil",
+                        "name": "hnsw",
+                        "parameters": {}
+                    }
+                },
+                "parent_game": {
+                    "type": "long"
+                },
+                "platforms": {
+                    "type": "long"
+                },
+                "player_perspectives": {
+                    "type": "long"
+                },
+                "ports": {
+                    "type": "long"
+                },
+                "rating": {
+                    "type": "float"
+                },
+                "rating_count": {
+                    "type": "long"
+                },
+                "release_dates": {
+                    "type": "long"
+                },
+                "remakes": {
+                    "type": "long"
+                },
+                "remasters": {
+                    "type": "long"
+                },
+                "screenshots": {
+                    "type": "long"
+                },
+                "similar_games": {
+                    "type": "long"
+                },
+                "slug": {
+                    "type": "text",
+                    "fields": {
+                        "keyword": {
+                            "type": "keyword",
+                            "ignore_above": 256
+                        }
+                    }
+                },
+                "standalone_expansions": {
+                    "type": "long"
+                },
+                "status": {
+                    "type": "long"
+                },
+                "storyline": {
+                    "type": "text"
+                },
+                "storyline_vector": {
+                    "type": "knn_vector",
+                    "dimension": 384,
+                    "method": {
+                        "engine": "lucene",
+                        "space_type": "cosinesimil",
+                        "name": "hnsw",
+                        "parameters": {}
+                    }
+                },
+                "summary": {
+                    "type": "text"
+                },
+                "summary_vector": {
+                    "type": "knn_vector",
+                    "dimension": 384,
+                    "method": {
+                        "engine": "lucene",
+                        "space_type": "cosinesimil",
+                        "name": "hnsw",
+                        "parameters": {}
+                    }
+                },
+                "tags": {
+                    "type": "long"
+                },
+                "themes": {
+                    "type": "long"
+                },
+                "total_rating": {
+                    "type": "float"
+                },
+                "total_rating_count": {
+                    "type": "long"
+                },
+                "updated_at": {
+                    "type": "long"
+                },
+                "url": {
+                    "type": "text",
+                    "fields": {
+                        "keyword": {
+                            "type": "keyword",
+                            "ignore_above": 256
+                        }
+                    }
+                },
+                "version_parent": {
+                    "type": "long"
+                },
+                "version_title": {
+                    "type": "text",
+                    "fields": {
+                        "keyword": {
+                            "type": "keyword",
+                            "ignore_above": 256
+                        }
+                    }
+                },
+                "videos": {
+                    "type": "long"
+                },
+                "websites": {
+                    "type": "long"
+                }
+            }
+        }
+    }
+}

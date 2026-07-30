@@ -464,16 +464,9 @@ class OpenSearchBundler:
         self.client = client
 
     def export_index(self, index: str, data_file: str, config_file: str):
-        """Exports index settings, mappings, and all documents.
-
-        Args:
-            index (str): Name of the index to export.
-            data_file (str): Path to save the documents in .jsonl format.
-            config_file (str): Path to save the metadata (settings and mappings) in .json format.
-        """
+        """Exports index settings, mappings, and all documents."""
         print(f"📦 Exporting index: {index}...")
 
-        # 1. Export Settings and Mappings to a single JSON file
         settings = self.client.indices.get_settings(index=index)
         mappings = self.client.indices.get_mapping(index=index)
 
@@ -483,10 +476,8 @@ class OpenSearchBundler:
             json.dump(config, f, indent=4)
         print(f"✅ Metadata saved to {config_file}")
 
-        # 2. Export Documents to JSONL (JSON Lines)
-        # Use Scroll API to handle indices larger than 10k docs
         query = {"query": {"match_all": {}}}
-        page = self.client.search(index=index, body=query, scroll="2m", size=1000)
+        page = self.client.search(index=index, body=query, scroll="2m", size=1000) # type: ignore
 
         scroll_id = page["_scroll_id"]
         hits = page["hits"]["hits"]
@@ -496,50 +487,123 @@ class OpenSearchBundler:
             while len(hits) > 0:
                 for hit in hits:
                     doc = hit["_source"]
-                    # Store the ID inside the document so we can restore it exactly
                     doc["_id"] = hit["_id"]
                     f.write(json.dumps(doc) + "\n")
                     count += 1
 
-                # Get the next batch of documents
-                page = self.client.scroll(scroll_id=scroll_id, scroll="2m")
+                page = self.client.scroll(scroll_id=scroll_id, scroll="2m") # type: ignore
                 scroll_id = page["_scroll_id"]
                 hits = page["hits"]["hits"]
 
         print(f"✅ {count} documents saved to {data_file}")
 
-    def import_index(self, data_file: str, config_file: str, new_index_name: str):
-        """Recreates the index and loads data from JSONL.
+    def _deep_clean(self, data):
+        """Recursively removes forbidden keys from nested dictionaries."""
+        # Stripping default_pipeline allows pre-embedded JSONL files to bulk-load without pipeline errors
+        forbidden = ["uuid", "creation_date", "version", "provided_name", "default_pipeline"]
+        if isinstance(data, dict):
+            return {
+                k: self._deep_clean(v) 
+                for k, v in data.items() 
+                if not any(word in k.lower() for word in forbidden)
+            }
+        elif isinstance(data, list):
+            return [self._deep_clean(i) for i in data]
+        return data
 
-        Args:
-            data_file (str): Path to the .jsonl file containing documents.
-            config_file (str): Path to the .json file containing index settings and mappings.
-            new_index_name (str): Name of the new index to be created.
-        """
-        print(f"🚀 Importing index into: {new_index_name}...")
+    def import_index(self, data_file: str, config_file: str, new_index_name: str, force_reimport: bool = False):
+        print(f"🚀 Checking index status for: {new_index_name}...")
 
-        # 1. Load Configuration
+        # 1. Register search pipeline for RRF hybrid search
+        search_pipeline_body = {
+            "description": "Modern RRF rank-blending search pipeline",
+            "phase_results_processors": [
+                {
+                    "score-ranker-processor": {
+                        "combination": {
+                            "technique": "rrf",
+                            "parameters": {"rank_constant": 60},
+                        }
+                    }
+                }
+            ],
+        }
+        try:
+            self.client.search_pipeline.put(
+                id="search_pipeline", body=search_pipeline_body
+            )
+        except Exception:
+            pass
+
+        # 2. Register ingest pipeline if ML model is active
+        try:
+            models = get_models(self.client)
+            if models:
+                model_id = models[0]
+                ingest_pipeline_body = {
+                    "description": "Ingest embedder",
+                    "processors": [
+                        {
+                            "text_embedding": {
+                                "model_id": model_id,
+                                "field_map": {
+                                    "name": "name_vector",
+                                    "summary": "summary_vector",
+                                    "storyline": "storyline_vector",
+                                    "title": "title_vector",
+                                    "text": "text_vector",
+                                },
+                            }
+                        }
+                    ],
+                }
+                self.client.ingest.put_pipeline(
+                    id=f"{new_index_name}_ingest_pipeline", body=ingest_pipeline_body
+                )
+        except Exception as e:
+            print(f"Notice setting ingest pipeline: {e}")
+
+        # 3. PERSISTENCE CHECK: If index already exists and has documents, SKIP import!
+        if self.client.indices.exists(index=new_index_name) and not force_reimport:
+            try:
+                doc_count = self.client.count(index=new_index_name).get("count", 0)
+                if doc_count > 0:
+                    print(f"✅ Index '{new_index_name}' already exists with {doc_count} documents. Skipping import.")
+                    return
+            except Exception:
+                pass
+
+        # 4. Load Configuration
         with open(config_file, "r", encoding="utf-8") as f:
             config = json.load(f)
 
-        # 2. Sanitize and Create Index
-        # We must remove cluster-specific IDs (UUIDs) or the import will fail
-        settings = config["settings"].get("settings", {})
-        for key in [
-            "index.uuid",
-            "index.creation_date",
-            "index.version",
-            "index.provided_name",
-        ]:
-            settings.pop(key, None)
+        raw_settings = config["settings"].get("settings", {})
+        sanitized_settings = self._deep_clean(raw_settings)
 
-        self.client.indices.create(
-            index=new_index_name,
-            body={"settings": settings, "mappings": config["mappings"]},
-        )
-        print(f"✅ Index {new_index_name} created.")
+        mappings_data = config["mappings"]
+        if "mappings" in mappings_data:
+            mappings_data = mappings_data["mappings"]
 
-        # 3. Bulk Import from JSONL
+        # 5. Delete existing empty index if needed
+        if self.client.indices.exists(index=new_index_name):
+            print(f"🗑️ Re-creating index '{new_index_name}' for clean import...")
+            self.client.indices.delete(index=new_index_name)
+
+        # 6. Create Index
+        try:
+            self.client.indices.create(
+                index=new_index_name,
+                body={
+                    "settings": sanitized_settings, 
+                    "mappings": mappings_data
+                },
+            )
+            print(f"✅ Index '{new_index_name}' created successfully.")
+        except Exception as e:
+            print(f"❌ Failed to create index '{new_index_name}': {e}")
+            return
+
+        # 7. Bulk Import Documents from JSONL
         def jsonl_generator():
             with open(data_file, "r", encoding="utf-8") as f:
                 for line in f:
@@ -547,10 +611,137 @@ class OpenSearchBundler:
                     doc_id = doc.pop("_id", None)
                     yield {"_index": new_index_name, "_id": doc_id, "_source": doc}
 
+        print(f"📦 Bulk loading documents into '{new_index_name}'...")
         success, failed = helpers.bulk(self.client, jsonl_generator())
-        print(f"✅ Successfully imported {success} documents. Failures: {failed}")
+        print(f"✅ Successfully imported {success} documents into '{new_index_name}'. Failures: {failed}")
+# class OpenSearchBundler:
+#     def __init__(self, client: OpenSearch):
+#         self.client = client
 
+#     def export_index(self, index: str, data_file: str, config_file: str):
+#         """Exports index settings, mappings, and all documents.
 
+#         Args:
+#             index (str): Name of the index to export.
+#             data_file (str): Path to save the documents in .jsonl format.
+#             config_file (str): Path to save the metadata (settings and mappings) in .json format.
+#         """
+#         print(f"📦 Exporting index: {index}...")
+
+#         # 1. Export Settings and Mappings to a single JSON file
+#         settings = self.client.indices.get_settings(index=index)
+#         mappings = self.client.indices.get_mapping(index=index)
+
+#         config = {"settings": settings[index], "mappings": mappings[index]}
+
+#         with open(config_file, "w", encoding="utf-8") as f:
+#             json.dump(config, f, indent=4)
+#         print(f"✅ Metadata saved to {config_file}")
+
+#         # 2. Export Documents to JSONL (JSON Lines)
+#         # Use Scroll API to handle indices larger than 10k docs
+#         query = {"query": {"match_all": {}}}
+#         page = self.client.search(index=index, body=query, scroll="2m", size=1000) # type: ignore
+
+#         scroll_id = page["_scroll_id"]
+#         hits = page["hits"]["hits"]
+#         count = 0
+
+#         with open(data_file, "w", encoding="utf-8") as f:
+#             while len(hits) > 0:
+#                 for hit in hits:
+#                     doc = hit["_source"]
+#                     # Store the ID inside the document so we can restore it exactly
+#                     doc["_id"] = hit["_id"]
+#                     f.write(json.dumps(doc) + "\n")
+#                     count += 1
+
+#                 # Get the next batch of documents
+#                 page = self.client.scroll(scroll_id=scroll_id, scroll="2m") # type: ignore
+#                 scroll_id = page["_scroll_id"]
+#                 hits = page["hits"]["hits"]
+
+#         print(f"✅ {count} documents saved to {data_file}")
+
+#     def _deep_clean(self, data):
+#         """Recursively removes forbidden keys from nested dictionaries."""
+#         forbidden = ["uuid", "creation_date", "version", "provided_name"]
+#         if isinstance(data, dict):
+#             return {
+#                 k: self._deep_clean(v) 
+#                 for k, v in data.items() 
+#                 if not any(word in k.lower() for word in forbidden)
+#             }
+#         elif isinstance(data, list):
+#             return [self._deep_clean(i) for i in data]
+#         return data
+
+#     def import_index(self, data_file: str, config_file: str, new_index_name: str):
+#         print(f"🚀 Importing index into: {new_index_name}...")
+
+#         # 1. Register search pipeline for RRF hybrid search
+#         search_pipeline_body = {
+#             "description": "Modern RRF rank-blending search pipeline",
+#             "phase_results_processors": [
+#                 {
+#                     "score-ranker-processor": {
+#                         "combination": {
+#                             "technique": "rrf",
+#                             "parameters": {"rank_constant": 60},
+#                         }
+#                     }
+#                 }
+#             ],
+#         }
+#         try:
+#             self.client.search_pipeline.put(
+#                 id="search_pipeline", body=search_pipeline_body
+#             )
+#         except Exception:
+#             pass
+
+#         # 2. Load Configuration
+#         with open(config_file, "r", encoding="utf-8") as f:
+#             config = json.load(f)
+
+#         raw_settings = config["settings"].get("settings", {})
+#         sanitized_settings = self._deep_clean(raw_settings)
+
+#         mappings_data = config["mappings"]
+#         if "mappings" in mappings_data:
+#             mappings_data = mappings_data["mappings"]
+
+#         # 3. Delete existing index if it already exists (clears empty shells)
+#         if self.client.indices.exists(index=new_index_name):
+#             print(f"🗑️ Deleting existing index '{new_index_name}' to start clean import...")
+#             self.client.indices.delete(index=new_index_name)
+
+#         # 4. Create Index
+#         try:
+#             self.client.indices.create(
+#                 index=new_index_name,
+#                 body={
+#                     "settings": sanitized_settings, 
+#                     "mappings": mappings_data
+#                 },
+#             )
+#             print(f"✅ Index '{new_index_name}' created successfully.")
+#         except Exception as e:
+#             print(f"❌ Failed to create index '{new_index_name}': {e}")
+#             return
+
+#         # 5. Bulk Import Documents from JSONL
+#         def jsonl_generator():
+#             with open(data_file, "r", encoding="utf-8") as f:
+#                 for line in f:
+#                     doc = json.loads(line)
+#                     doc_id = doc.pop("_id", None)
+#                     yield {"_index": new_index_name, "_id": doc_id, "_source": doc}
+
+#         print(f"📦 Loading documents into '{new_index_name}'...")
+#         success, failed = helpers.bulk(self.client, jsonl_generator())
+#         print(f"✅ Successfully imported {success} documents into '{new_index_name}'. Failures: {failed}")
+    
 class PostgresBundler:
     def __init__(self, container_name="postgres", user="user", password="postgres"):
         self.container_name = container_name
@@ -568,7 +759,7 @@ class PostgresBundler:
 
         # We set the PGPASSWORD environment variable so pg_dump doesn't ask for a password
         # The command is executed INSIDE the docker container and streamed to a local file
-        cmd = f"docker exec -e PGPASSWORD={self.password} {self.container_name} pg_dump -U {self.user} {db_name}"
+        cmd = f"docker exec -u postgres -e PGPASSWORD={self.password} {self.container_name} pg_dump -h localhost -U {self.user} {db_name}"
 
         try:
             with open(output_file, "w") as f:
@@ -642,6 +833,15 @@ if __name__ == "__main__":
     rag_client = RAGClient(opensearch_client, model)
     evaluator = Evaluator(rag_client, None)
 
+    opensearch_bundler = OpenSearchBundler(opensearch_client)
+
+    # opensearch_bundler.export_index(index="wikipedia", data_file="data/wikipedia_index.jsonl", config_file="data/wikipedia_config.json")
+    # opensearch_bundler.export_index(index="igdb", data_file="data/igdb_index.jsonl", config_file="data/igdb_config.json")
+
+    postgres_blunder = PostgresBundler()
+    # postgres_blunder.export_database("evaluations", "data/evaluations.sql")
+    postgres_blunder.export_database("usage", "data/usage.sql")
+
     # response = opensearch_client.search(
     #     index="wikipedia",
     #     body={
@@ -682,9 +882,9 @@ if __name__ == "__main__":
     # evaluator.ground_truth = pd.read_csv("data/wikipedia_ground_truth.csv")
     # evaluator.evaluate_agent(judge, overwrite=False, max_workers=1, index="wikipedia")
 
-    rag_client.rag("Tell me about the game Dark Souls")
+    # rag_client.rag("Tell me about the game Dark Souls")
 
-    save_usage_metadata(rag_client.usage_history[-1], None, model=model)
+    # save_usage_metadata(rag_client.usage_history[-1], None, model=model)
     # print(result)
     # Boosting optimization
 
