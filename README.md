@@ -175,4 +175,10 @@ We can observe the model's performance and usage in the tab <!-- Insert tab name
 * The token usage (input and output) and price (if you are using a paid model).
 
 On the streamlit app access the *usage* tab  
-![streamlit_screenshot](media/imgs/streamlit_app.jpg)
+<p align="center">
+<img src="media/imgs/chat_example.png" alt="Chat screenshot" width="400"/>
+</p>
+
+<p align="center">
+<img src="media/imgs/analytics_example.png" alt="Analytics screenshot" width="400"/>
+</p>

@@ -1,9 +1,45 @@
 import os
+import glob
 
 from opensearch_utils import setup_embedder
 from opensearchpy import OpenSearch
 from dotenv import load_dotenv
 from ingest import PostgresBundler, OpenSearchBundler
+
+# Configuration
+
+
+def assemble_file(file_path: str, force_reassemble: bool = False):
+    parts = sorted(glob.glob(f"{file_path}.*.part"))
+
+    output_file = f"{file_path}"
+
+    if os.path.exists(file_path) and not force_reassemble:
+        print(f"File {file_path} already exists. Skipping assembly.")
+        return
+
+    if not parts:
+        print("No file fragments found!")
+        return
+
+    print(f"Assembling {file_path} from {len(parts)} parts...")
+
+    # 3. Rebuild the file
+    try:
+        with open(file_path, "wb") as output_file:
+            for part in parts:
+                print(f"Appending {part}...")
+                with open(part, "rb") as pf:
+                    output_file.write(pf.read())
+        print("Assembly complete!")
+    except Exception as e:
+        print(f"An error occurred during assembly: {e}")
+        # Clean up partial file if it failed mid-way
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+    print("Assembly complete!")
+
 
 load_dotenv()
 
@@ -29,6 +65,10 @@ if __name__ == "__main__":
 
     opensearch_bundler = OpenSearchBundler(opensearch_client)
     postgres_blunder = PostgresBundler()
+
+    # Assmebly of the parts files
+    assemble_file("data/wikipedia_index.jsonl")
+    assemble_file("data/igdb_index.jsonl")
 
     print(f"Force re-import mode: {FORCE_REIMPORT}")
 
