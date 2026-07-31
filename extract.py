@@ -10,7 +10,7 @@ from ingest import PostgresBundler, OpenSearchBundler
 
 
 def assemble_file(file_path: str, force_reassemble: bool = False):
-    parts = sorted(glob.glob(f"{file_path}.*.part"))
+    parts = sorted(glob.glob(f"{file_path}*.part"))
 
     output_file = f"{file_path}"
 

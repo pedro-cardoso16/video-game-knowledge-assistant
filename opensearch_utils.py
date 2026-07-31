@@ -16,12 +16,26 @@ pleasant execution boundaries.
 
 import time
 import json
+import base64
 
 from tqdm import tqdm
-
-# from collections.abc import Iterable
 from opensearchpy import OpenSearch, exceptions
 from typing import Iterable, Literal
+
+# At module level in opensearch_utils.py
+_CACHED_MODEL_ID = None
+
+
+def get_active_model_id(opensearch_client: OpenSearch) -> str | None:
+    """Fetches and caches the active model ID to prevent spamming OpenSearch."""
+    global _CACHED_MODEL_ID
+    if _CACHED_MODEL_ID is not None:
+        return _CACHED_MODEL_ID
+
+    models = get_models(opensearch_client)
+    if models:
+        _CACHED_MODEL_ID = models[0]
+    return _CACHED_MODEL_ID
 
 
 def create_index_with_semantic_search(
@@ -136,47 +150,83 @@ def setup_embedder(
 ) -> str:
     """
     Registers and deploys an embedding model in OpenSearch.
-    If the model already exists and is deployed, it returns the existing model_id.
-
-    Args:
-        opensearch_client: Active OpenSearch client instance.
-        model (str): The address of the model to use.
-        local_model_path (str | None): Optional path to a local model file to upload.
-
-    Returns:
-        model_id (str): The id of the created model.
+    If the model already exists and is deployed (or undeployed), it reuses/deploys the existing model_id.
     """
-    # 1. Check if the model is already registered and deployed
-    existing_models = get_models(opensearch_client)
-    
-    if existing_models:
-        model_id = existing_models[0]
-        print(f"\nFound existing model ID: {model_id}. Checking deployment status...")
-        
-        response = opensearch_client.transport.perform_request(
-            "GET", f"/_plugins/_ml/models/{model_id}"
+    # 0. Dynamically raise max_model_on_node limit
+    try:
+        opensearch_client.cluster.put_settings(
+            body={"persistent": {"plugins.ml_commons.max_model_on_node": 100}}
         )
-        if response.get("state") == "DEPLOYED":
-            print("Model is already warm and active. Skipping setup.")
-            return model_id
+    except Exception:
+        pass
+
+    # 1. Check if a model is already registered or deployed in OpenSearch
+    existing_models = get_models(opensearch_client)
+
+    if existing_models:
+        for model_id in existing_models:
+            try:
+                response = opensearch_client.transport.perform_request(
+                    "GET", f"/_plugins/_ml/models/{model_id}"
+                )
+
+                # CRITICAL FIX: OpenSearch Get Model API uses "model_state"
+                state = response.get("model_state") or response.get("state")
+                print(f"Found existing model ID '{model_id}' in state: {state}")
+
+                # Case A: Model is already deployed -> Return immediately
+                if state == "DEPLOYED":
+                    print(f"✅ Model '{model_id}' is active and deployed. Reusing it.")
+                    return model_id
+
+                # Case B: Model exists but is UNDEPLOYED/REGISTERED -> Deploy it directly!
+                if state in ("REGISTERED", "UNDEPLOYED"):
+                    print(f"🚀 Deploying existing model ID '{model_id}' to RAM...")
+                    deploy_response = opensearch_client.transport.perform_request(
+                        "POST", f"/_plugins/_ml/models/{model_id}/_deploy"
+                    )
+                    deploy_task_id = deploy_response["task_id"]
+
+                    t1 = time.time()
+                    while True:
+                        task_info = opensearch_client.transport.perform_request(
+                            "GET", f"/_plugins/_ml/tasks/{deploy_task_id}"
+                        )
+                        task_status = task_info.get("state") or task_info.get(
+                            "model_state"
+                        )
+
+                        if task_status == "COMPLETED":
+                            print(
+                                f"\n✅ Deployment COMPLETED in {time.time() - t1:.1f}s. Reusing Model ID: {model_id}"
+                            )
+                            return model_id
+
+                        if task_status in ["FAILED", "CANCELLED"]:
+                            print(
+                                f"Deployment of existing model {model_id} failed. Checking next model..."
+                            )
+                            break
+
+                        print(
+                            f"Deploying model to node RAM... Status: {task_status} | Time elapsed: {time.time() - t1:.1f}s",
+                            end="\r",
+                        )
+                        time.sleep(3)
+            except Exception as e:
+                print(f"Notice checking existing model {model_id}: {e}")
 
     # Check whether or not a model group already exists
     response = opensearch_client.transport.perform_request(
         "GET",
         "/_plugins/_ml/model_groups/_search",
-        body={
-            "query": {
-                "match": {"name": "default_model_group"},
-            },
-        },
+        body={"query": {"match": {"name": "default_model_group"}}},
     )
 
-    # If the model group exists, skips the group creation
     try:
         model_group_id: str = response["hits"]["hits"][0]["_id"]
-    except:
+    except Exception:
         print("Model group doesn't exist, creating one...")
-        # Creates a ml group that may be used for sentence embedding
         response = opensearch_client.transport.perform_request(
             "POST",
             "/_plugins/_ml/model_groups/_register",
@@ -188,13 +238,13 @@ def setup_embedder(
         model_group_id: str = response["model_group_id"]
 
     # =====================================================================
-    # 1. REGISTER THE MODEL
+    # 2. REGISTER THE MODEL (Only runs if NO existing model was found)
     # =====================================================================
     if local_model_path:
         print(f"\n[1/2] Uploading local model from: {local_model_path}")
         with open(local_model_path, "rb") as f:
-            model_data = f.read()
-            
+            model_data = base64.b64encode(f.read()).decode("utf-8")
+
         response = opensearch_client.transport.perform_request(
             "POST",
             "/_plugins/_ml/models/_register",
@@ -203,7 +253,7 @@ def setup_embedder(
                 "version": "1.0.2",
                 "model_group_id": model_group_id,
                 "model_format": "ONNX",
-                "model_content": model_data, # Use the uploaded bytes
+                "model_content": model_data,
             },
         )
     else:
@@ -219,15 +269,13 @@ def setup_embedder(
             },
         )
 
-    # Save the task id for progress check
     reg_task_id = response["task_id"]
-
     t0 = time.time()
     while True:
         response = opensearch_client.transport.perform_request(
             "GET", f"/_plugins/_ml/tasks/{reg_task_id}"
         )
-        status = response.get("state")
+        status = response.get("state") or response.get("model_state")
 
         if status == "COMPLETED":
             model_id = response["model_id"]
@@ -242,14 +290,10 @@ def setup_embedder(
                 f"\nModel Registration Failed ({status}): {error_details}"
             )
 
-        print(
-            f"Registering model... Status: {status} | Time elapsed: {time.time() - t0:.1f}s",
-            end="\r",
-        )
         time.sleep(3)
 
     # =====================================================================
-    # 2. DEPLOY THE MODEL (Loads the model binaries into cluster memory)
+    # 3. DEPLOY THE MODEL
     # =====================================================================
     print(f"\n[2/2] Dispatched deployment request for model ID: {model_id}")
     deploy_response = opensearch_client.transport.perform_request(
@@ -262,7 +306,7 @@ def setup_embedder(
         response = opensearch_client.transport.perform_request(
             "GET", f"/_plugins/_ml/tasks/{deploy_task_id}"
         )
-        status = response.get("state")
+        status = response.get("state") or response.get("model_state")
 
         if status == "COMPLETED":
             print(
@@ -274,33 +318,50 @@ def setup_embedder(
             error_details = response.get("error", "Unknown deployment failure")
             raise RuntimeError(f"\nModel Deployment Failed ({status}): {error_details}")
 
-        print(
-            f"Deploying model to node RAM... Status: {status} | Time elapsed: {time.time() - t1:.1f}s",
-            end="\r",
-        )
         time.sleep(3)
 
     return model_id
 
 
+# def get_models(opensearch_client: OpenSearch) -> list[str]:
+
+#     response = opensearch_client.transport.perform_request(
+#         "GET",
+#         "/_plugins/_ml/models/_search",
+#         body={
+#             "query": {
+#                 "match_all": {},
+#             },
+#         },
+#     )["hits"]["hits"]
+
+#     try:
+#         response = {r["_source"]["model_id"] for r in response}
+#     except:
+#         response = set()
+
+#     return list(response)
+
+import re
+
+
 def get_models(opensearch_client: OpenSearch) -> list[str]:
-
-    response = opensearch_client.transport.perform_request(
-        "GET",
-        "/_plugins/_ml/models/_search",
-        body={
-            "query": {
-                "match_all": {},
-            },
-        },
-    )["hits"]["hits"]
-
+    """Retrieves all parent ML model IDs, excluding internal chunk files (_0, _1, etc.)."""
     try:
-        response = {r["_source"]["model_id"] for r in response}
-    except:
-        response = set()
+        response = opensearch_client.transport.perform_request(
+            "GET",
+            "/_plugins/_ml/models/_search",
+            body={"query": {"match_all": {}}, "size": 100},
+        )["hits"]["hits"]
 
-    return list(response)
+        # Filter out chunk files that end with _digit (e.g., _0, _12)
+        parent_models = {
+            r["_id"] for r in response if not re.search(r"_\d+$", r["_id"])
+        }
+        return list(parent_models)
+    except Exception as e:
+        print(f"Notice fetching models: {e}")
+        return []
 
 
 def ingest_from_jsonl(
@@ -335,7 +396,9 @@ from typing import Iterable, Literal
 from opensearchpy import OpenSearch
 
 
-def get_searchable_text_fields(opensearch_client: OpenSearch, index_name: str) -> list[str]:
+def get_searchable_text_fields(
+    opensearch_client: OpenSearch, index_name: str
+) -> list[str]:
     """Dynamically extracts all searchable text/keyword fields from ANY index mapping,
     automatically excluding knn_vector fields to prevent multi_match errors."""
     try:
@@ -347,7 +410,11 @@ def get_searchable_text_fields(opensearch_client: OpenSearch, index_name: str) -
         for field, spec in properties.items():
             if isinstance(spec, dict):
                 field_type = spec.get("type", "")
-                if field_type in ("text", "keyword") and field_type != "knn_vector" and not field.endswith("_vector"):
+                if (
+                    field_type in ("text", "keyword")
+                    and field_type != "knn_vector"
+                    and not field.endswith("_vector")
+                ):
                     text_fields.append(field)
 
         if text_fields:
@@ -355,7 +422,12 @@ def get_searchable_text_fields(opensearch_client: OpenSearch, index_name: str) -
     except Exception:
         pass
 
-    return ["title", "text"] if "wiki" in index_name.lower() else ["name", "summary", "storyline"]
+    return (
+        ["title", "text"]
+        if "wiki" in index_name.lower()
+        else ["name", "summary", "storyline"]
+    )
+
 
 def get_vector_fields(opensearch_client: OpenSearch, index_name: str) -> list[str]:
     """Dynamically retrieves all field names ending with '_vector' for any index."""
@@ -363,7 +435,12 @@ def get_vector_fields(opensearch_client: OpenSearch, index_name: str) -> list[st
         response = opensearch_client.indices.get_mapping(index=index_name)
         index_mapping = next(iter(response.values()), {}).get("mappings", {})
         properties = index_mapping.get("properties", {})
-        return [field for field, spec in properties.items() if field.endswith("_vector") or (isinstance(spec, dict) and spec.get("type") == "knn_vector")]
+        return [
+            field
+            for field, spec in properties.items()
+            if field.endswith("_vector")
+            or (isinstance(spec, dict) and spec.get("type") == "knn_vector")
+        ]
     except Exception:
         return []
 
@@ -375,7 +452,7 @@ def search(
     num: int,
     model_id: str | None = None,
     boost_dict: dict = {},
-    search_type: Literal["lexical", "semantic", "hybrid"] = "lexical",
+    search_type: str | Literal["lexical", "semantic", "hybrid"] = "lexical",
     search_fields: Iterable[str] | None = None,
 ):
     """Universal search wrapper supporting lexical, semantic, and hybrid search across any index schema."""
@@ -386,9 +463,13 @@ def search(
     if fields[0] == "*":
         fields = get_searchable_text_fields(opensearch_client, index)
 
+    # USE CACHED MODEL ID (Does not execute an extra HTTP request)
     if model_id is None:
-        models = get_models(opensearch_client)
-        model_id = models[0] if models else None
+        model_id = get_active_model_id(opensearch_client)
+
+    # if model_id is None:
+    #     models = get_models(opensearch_client)
+    #     model_id = models[0] if models else None
 
     query_block = {}
 
@@ -452,141 +533,130 @@ def search(
 
     return opensearch_client.search(index=index, body=body)
 
+    # def search(
+    #     opensearch_client: OpenSearch,
+    #     index: str,
+    #     query: str,
+    #     num: int,
+    #     model_id: str | None = None,
+    #     boost_dict: dict = {},
+    #     search_type: Literal["lexical", "semantic", "hybrid"] = "lexical",
+    #     search_fields: Iterable[str] | None = None,
+    # ):
+    #     """Search wrapper for OpenSearch supporting lexical, semantic, and hybrid modes."""
 
+    #     fields = list(search_fields) if search_fields else ["*"]
+    #     query_block = {}
 
+    #     if model_id is None:
+    #         model_id = get_models(opensearch_client)[0]
 
+    #     match search_type:
+    #         case "lexical":
+    #             boosted_fields = [f"{f}^{boost_dict.get(f, 1)}" for f in fields]
+    #             query_block = {"multi_match": {"query": query, "fields": boosted_fields}}
 
+    #         case "semantic":
+    #             # if len(fields) == 1:
+    #             if fields[0] == '*':
+    #                 fields = get_vector_fields(opensearch_client, index)
+    #                 # Remove the '_vector' suffix if you need the original text field names
+    #                 fields = [f.replace("_vector", "") for f in fields]
 
+    #             # query_block = {
+    #             #     "neural": {
+    #             #         f"{field}_vector": (
+    #             #             {
+    #             #                 "query_text": query,
+    #             #                 "model_id": model_id,
+    #             #             }
+    #             #         )
+    #             #     }
+    #             # }
+    #             # else:
+    #             should_queries = [
+    #                 {
+    #                     "neural": {
+    #                         f"{key}_vector": (
+    #                             {
+    #                                 "query_text": query,
+    #                                 "model_id": model_id,
+    #                             }
+    #                         )
+    #                     }
+    #                 }
+    #                 for key in fields
+    #             ]
+    #             query_block = {"bool": {"should": should_queries}}
 
+    #         case "hybrid":
+    #             if fields[0] == '*':
+    #                 fields = get_vector_fields(opensearch_client, index)
+    #                 # Remove the '_vector' suffix if you need the original text field names
+    #                 fields = [f.replace("_vector", "") for f in fields]
 
+    #             # if len(fields) == 1:
+    #             #     field = fields[0]
+    #                  # neural_part = {
+    #                 #     "neural": {
+    #                 #         f"{field}_vector": (
+    #                 #             {
+    #                 #                 "query_text": query,
+    #                 #                 "model_id": model_id,
+    #                 #             }
+    #                 #         )
+    #                 #     }
+    #                 # }
+    #             # else:
+    #             neural_part = {
+    #                 "bool": {
+    #                     "should": [
+    #                         {
+    #                             "neural": {
+    #                                 f"{key}_vector": (
+    #                                     {
+    #                                         "query_text": query,
+    #                                         "model_id": model_id,
+    #                                     }
+    #                                 )
+    #                             }
+    #                         }
+    #                         for key in fields
+    #                     ]
+    #                 }
+    #             }
 
+    #             boosted_fields = [f"{f}^{boost_dict.get(f, 1)}" for f in fields]
+    #             query_block = {
+    #                 "hybrid": {
+    #                     "queries": [
+    #                         {"multi_match": {"query": query, "fields": boosted_fields}},
+    #                         neural_part,
+    #                     ],
+    #                 },
+    #             }
 
-# def search(
-#     opensearch_client: OpenSearch,
-#     index: str,
-#     query: str,
-#     num: int,
-#     model_id: str | None = None,
-#     boost_dict: dict = {},
-#     search_type: Literal["lexical", "semantic", "hybrid"] = "lexical",
-#     search_fields: Iterable[str] | None = None,
-# ):
-#     """Search wrapper for OpenSearch supporting lexical, semantic, and hybrid modes."""
+    #         case _:
+    #             raise ValueError(
+    #                 "Invalid search_type value, must be 'lexical', 'semantic' or 'hybrid'."
+    #             )
 
-#     fields = list(search_fields) if search_fields else ["*"]
-#     query_block = {}
+    #     body = {
+    #         "size": num,
+    #         "query": query_block,
+    #     }
 
+    #     return opensearch_client.search(index=index, body=body)
 
-#     if model_id is None:
-#         model_id = get_models(opensearch_client)[0]
-
-#     match search_type:
-#         case "lexical":
-#             boosted_fields = [f"{f}^{boost_dict.get(f, 1)}" for f in fields]
-#             query_block = {"multi_match": {"query": query, "fields": boosted_fields}}
-
-#         case "semantic":
-#             # if len(fields) == 1:
-#             if fields[0] == '*':
-#                 fields = get_vector_fields(opensearch_client, index)
-#                 # Remove the '_vector' suffix if you need the original text field names
-#                 fields = [f.replace("_vector", "") for f in fields]
-            
-#             # query_block = {
-#             #     "neural": {
-#             #         f"{field}_vector": (
-#             #             {
-#             #                 "query_text": query,
-#             #                 "model_id": model_id,
-#             #             }
-#             #         )
-#             #     }
-#             # }
-#             # else:
-#             should_queries = [
-#                 {
-#                     "neural": {
-#                         f"{key}_vector": (
-#                             {
-#                                 "query_text": query,
-#                                 "model_id": model_id,
-#                             }
-#                         )
-#                     }
-#                 }
-#                 for key in fields
-#             ]
-#             query_block = {"bool": {"should": should_queries}}
-
-#         case "hybrid":
-#             if fields[0] == '*':
-#                 fields = get_vector_fields(opensearch_client, index)
-#                 # Remove the '_vector' suffix if you need the original text field names
-#                 fields = [f.replace("_vector", "") for f in fields]
-
-#             # if len(fields) == 1:
-#             #     field = fields[0]
-#                  # neural_part = {
-#                 #     "neural": {
-#                 #         f"{field}_vector": (
-#                 #             {
-#                 #                 "query_text": query,
-#                 #                 "model_id": model_id,
-#                 #             }
-#                 #         )
-#                 #     }
-#                 # }
-#             # else:
-#             neural_part = {
-#                 "bool": {
-#                     "should": [
-#                         {
-#                             "neural": {
-#                                 f"{key}_vector": (
-#                                     {
-#                                         "query_text": query,
-#                                         "model_id": model_id,
-#                                     }
-#                                 )
-#                             }
-#                         }
-#                         for key in fields
-#                     ]
-#                 }
-#             }
-
-#             boosted_fields = [f"{f}^{boost_dict.get(f, 1)}" for f in fields]
-#             query_block = {
-#                 "hybrid": {
-#                     "queries": [
-#                         {"multi_match": {"query": query, "fields": boosted_fields}},
-#                         neural_part,
-#                     ],
-#                 },
-#             }
-
-#         case _:
-#             raise ValueError(
-#                 "Invalid search_type value, must be 'lexical', 'semantic' or 'hybrid'."
-#             )
-
-#     body = {
-#         "size": num,
-#         "query": query_block,
-#     }
-
-#     return opensearch_client.search(index=index, body=body)
-
-
-# def get_vector_fields(opensearch_client: OpenSearch, index_name: str) -> list[str]:
+    # def get_vector_fields(opensearch_client: OpenSearch, index_name: str) -> list[str]:
     """Retrieves all field names from an index that end with '_vector'."""
     # 1. Fetch the mapping for the index
     response = opensearch_client.indices.get_mapping(index=index_name)
-    
+
     # 2. Navigate the response structure: {index_name}: {mappings: {properties: {...}}}
     properties = response[index_name].get("mappings", {}).get("properties", {})
-    
+
     # 3. Filter for fields ending in '_vector'
     vector_fields = [field for field in properties.keys() if field.endswith("_vector")]
-    
+
     return vector_fields

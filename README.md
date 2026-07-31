@@ -47,8 +47,10 @@ https://localhost:9200
 ```
 
 In the web page you should see
-<!-- Insert figure here -->
 
+<p align="center">
+<img src="media/imgs/chat_example.png" alt="Chat screenshot" width="400"/>
+</p>
 
 
 # How it works
@@ -174,10 +176,8 @@ We can observe the model's performance and usage in the tab <!-- Insert tab name
 * LLM-judge evaluations on tool usage and answer quality
 * The token usage (input and output) and price (if you are using a paid model).
 
-On the streamlit app access the *usage* tab  
-<p align="center">
-<img src="media/imgs/chat_example.png" alt="Chat screenshot" width="400"/>
-</p>
+On the streamlit app access the *analytics* tab  
+
 
 <p align="center">
 <img src="media/imgs/analytics_example.png" alt="Analytics screenshot" width="400"/>

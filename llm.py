@@ -1,4 +1,3 @@
-import pydantic
 import time
 import random
 from ingest import save_usage_metadata
@@ -16,31 +15,41 @@ You are a specialized Video Game Knowledge Assistant. Your primary goal is to pr
 factually accurate information sourced EXCLUSIVELY from the provided search tools.
 
 ## MANDATORY OPERATING PROCEDURES:
+
 1. **TOOL-FIRST RULE**: You are STRICTLY FORBIDDEN from answering a question using your 
-   internal knowledge. Even if you believe you know the answer, you MUST call the 
-   `opensearch_search` tool first to retrieve the most current data from the database.
-   
-2. **QUERY REWRITING**: When calling search tools, do not simply pass the user's query. 
-   Rephrase and optimize the query to improve search recall. Extract key entities and 
-   concepts to create a search term that is likely to match the stored document metadata.
-   
-3. **EVIDENCE-BASED RESPONSES**: Every claim in your answer must be supported by the 
-   results returned from the search tool. Do not invent facts or "hallucinate" details.
+   internal knowledge alone. You MUST call the `opensearch_search` tool first.
 
-4. **TRANSPARENCY**: You must explicitly state which tool and index you used to 
-   find the information (e.g., "Based on the IGDB index...").
+2. **INDIVIDUAL & CLEAN QUERIES**:
+   - **One Game Per Search**: When looking up information for multiple games, you MUST 
+    execute **separate, individual tool calls for EACH game**. NEVER combine multiple 
+    game titles into a single search query.
+   - **Clean Game Titles**: Strip out extra noise from Wikipedia or conversation history 
+    before searching IGDB (e.g., search for `"Lords of the Fallen"`, NOT `"Lords of the Fallen (2014)"`).
 
-5. **FALLBACK**: If the search tool returns no results or the information is 
-   insufficient to answer the question accurately, simply state: "I don't know."
+3. **MULTI-STEP & STRATEGIC REASONING**:
+   - Complex queries (e.g., "games similar to X") require multi-step search workflows:
+        * **Step 1 (Inspect)**: Search for the target game to retrieve its traits (genres, themes, storyline).
+        * **Step 2 (Discover)**: Formulate individual search queries for each discovered candidate game.
+        * **Step 3 (Verify)**: Confirm details from retrieved documents before outputting results.
+
+4. **SEARCH TACTICS & RETRIES**:
+   - Use `igdb` for structured metadata, ratings, summaries, and storylines.
+   - Use `wikipedia` for historical or broader contextual queries.
+   - If `lexical` search yields no results for a title, retry using `hybrid` or `semantic` search.
+
+5. **EVIDENCE-BASED RESPONSES**:
+   - Every claim, title, rating, or fact in your final answer MUST be supported by 
+    retrieved tool evidence. Do not invent facts or ratings.
+
+6. **TRANSPARENCY & FALLBACK**:
+   - Explicitly state which index you used (e.g., "Based on the IGDB index...").
+   - If you execute an individual search for a specific game across indices/search types 
+    and find no results, explicitly state for that specific game: "For this specific one, I couldn't retrieve the information."
 
 ## STYLE GUIDELINES:
-- Be concise and objective.
-- Briefly explain your reasoning based on the retrieved context.
-- Answer ONLY using information you can support with tool evidence.
+- Be concise, objective, and well-structured.
+- Answer ONLY using details supported by tool evidence.
 """.strip()
-
-# You may answer questions that unrelated to video games if they are easy and
-# simple to answer.
 
 PROMPT = """
 QUESTION:
@@ -84,6 +93,7 @@ class RAGClient:
     ) -> None:
         self.usage_history = []
         self.last_history = None
+        self.default_boost_dict: dict[str, dict[str, float]] | None = None
         self.__tools: list = []
         self.__search_engine: OpenSearch | None = None
 
@@ -117,161 +127,7 @@ class RAGClient:
 
         return response
 
-    # def rag(self, query: str) -> str:
-    #     """Retrieval Augmented Generation with Agentic Tool Use
-
-    #     Args:
-    #         query (str): query to search in the database and for llm to answer
-    #     """
-    #     # Initialize conversation history
-    #     history: types.ContentListUnionDict = [
-    #         types.Content(role="user", parts=[types.Part.from_text(text=query)])
-    #     ]
-
-    #     max_turns = 5
-    #     max_retries = 5
-    #     turn = 0
-
-    #     while turn < max_turns:
-    #         retries = 0
-    #         response = None
-    #         while retries < max_retries:
-    #             try:
-    #                 # Call the LLM with the full history
-    #                 response = self.__client.models.generate_content(
-    #                     model=self.__model,
-    #                     contents=history,
-    #                     config=types.GenerateContentConfig(
-    #                         system_instruction=INSTRUCTION,
-    #                         tools=[opensearch_search],
-    #                         tool_config=types.ToolConfig(
-    #                             function_calling_config=types.FunctionCallingConfig(
-    #                                 # Initial call forces tool use; subsequent calls are AUTO
-    #                                 mode=(
-    #                                     types.FunctionCallingConfigMode.ANY
-    #                                     if turn == 0
-    #                                     else types.FunctionCallingConfigMode.AUTO
-    #                                 ),
-    #                             ),
-    #                         ),
-    #                     ),
-    #                 )
-
-    #                 self.usage_history.append(response.usage_metadata)
-    #                 break
-
-    #             except APIError as e:
-    #                 if "429" in str(e):
-    #                     retries += 1
-    #                     wait_time = (2**retries) * 10 + random.random()
-    #                     print(f"Quota exceeded (429). Retrying in {wait_time:.2f} seconds...")
-    #                     time.sleep(wait_time)
-    #                     continue
-    #                 raise e
-
-    #         print("Successfully retrieved the content.")
-    #         # Extract text parts manually to avoid the 'non-text parts' warning from .text property
-    #         text_parts = [
-    #             p.text for p in response.candidates[0].content.parts if p.text
-    #         ]
-
-    #         # If the model provides a final text answer AND no tool calls, we are done
-    #         if text_parts and not response.function_calls:
-    #             # Add the final response to history for completeness
-    #             history.append(
-    #                 types.Content(
-    #                     role="model", parts=response.candidates[0].content.parts
-    #                 )
-    #             )
-
-    #             self.last_history = history
-    #             return "\n".join(text_parts)
-
-    #         # Otherwise, the model wants to call tools
-    #         # We must add the model's tool call response to history before responding to it
-    #         history.append(
-    #             types.Content(role="model", parts=response.candidates[0].content.parts)
-    #         )
-
-    #         func_calls = response.function_calls
-    #         if not func_calls:
-    #             break
-
-    #         # Process all tool calls in the current turn (Parallel Tool Calling)
-    #         tool_responses = []
-    #         for call in func_calls:
-    #             args = call.args
-    #             name = call.name
-
-    #             if name == "opensearch_search":
-    #                 # Sanitize and limit arguments to prevent quota exhaustion
-    #                 safe_args = (args or {}).copy()
-    #                 safe_args["num"] = min(safe_args.get("num", 3), 3)
-
-    #                 results = self.search(**safe_args)
-
-    #                 # Clean results: OpenSearch returns a dict with hits -> hits.
-    #                 # We must extract _source and ignore vectors.
-    #                 cleaned_results = []
-
-    #                 # Handle OpenSearch response structure
-    #                 hits = []
-    #                 if isinstance(results, dict) and "hits" in results:
-    #                     hits = results["hits"].get("hits", [])
-    #                 elif isinstance(results, list):
-    #                     hits = results
-
-    #                 for hit in hits:
-    #                     # Get the actual document source
-    #                     source = (
-    #                         hit.get("_source", hit) if isinstance(hit, dict) else hit
-    #                     )
-
-    #                     if isinstance(source, dict):
-    #                         # Filter out the vector fields and technical metadata to get the actual content
-    #                         # We exclude any field containing 'vector' or 'embedding' to be generic
-    #                         content_fields = [
-    #                             f"{k}: {v}"
-    #                             for k, v in source.items()
-    #                             if not any(
-    #                                 bad in k.lower()
-    #                                 for bad in ["vector", "embedding", "id"]
-    #                             )
-    #                         ]
-
-    #                         text_val = ", ".join(content_fields)
-    #                         cleaned_results.append(
-    #                             text_val[:1000] if text_val else "Empty document"
-    #                         )
-    #                     else:
-    #                         cleaned_results.append(str(source)[:1000])
-
-    #                 if not cleaned_results:
-    #                     cleaned_results = ["No relevant information found."]
-
-    #                 tool_responses.append(
-    #                     types.Part.from_function_response(
-    #                         name=name,
-    #                         response={"result": cleaned_results},
-    #                     )
-    #                 )
-    #             else:
-    #                 tool_responses.append(
-    #                     types.Part.from_function_response(
-    #                         name=name or "Unknown",
-    #                         response={"error": f"Unknown tool {name}"},
-    #                     )
-    #                 )
-
-    #         # Add all tool results as a single 'tool' role entry in history
-    #         history.append(types.Content(role="tool", parts=tool_responses))
-
-    #         turn += 1
-    #         time.sleep(10)
-
-    #     return "I'm sorry, I was unable to find a final answer after the maximum number of turns."
-
-    def rag(self, query: str, history: list | None = None) -> tuple[str, list]:
+    def rag(self, query: str, history: list | None = None) -> tuple[str, list]:  # type: ignore
         """Retrieval Augmented Generation with Agentic Tool Use
 
         Args:
@@ -286,7 +142,7 @@ class RAGClient:
             history: types.ContentListUnionDict = []
 
         history.append(
-            types.Content(role="user", parts=[types.Part.from_text(text=query)])
+            types.Content(role="user", parts=[types.Part.from_text(text=query)])  # type: ignore
         )
 
         max_turns = 10
@@ -315,7 +171,7 @@ class RAGClient:
                             ),
                         ),
                     )
-                    
+
                     self.usage_history.append(response.usage_metadata)
                     break
 
@@ -332,23 +188,23 @@ class RAGClient:
 
             print("Successfully retrieved the content.")
             text_parts = [
-                p.text for p in response.candidates[0].content.parts if p.text
+                p.text for p in response.candidates[0].content.parts if p.text  # type: ignore
             ]
 
-            if text_parts and not response.function_calls:
+            if text_parts and not response.function_calls:  # type: ignore
                 history.append(
                     types.Content(
-                        role="model", parts=response.candidates[0].content.parts
+                        role="model", parts=response.candidates[0].content.parts  # type: ignore
                     )
                 )
                 self.last_history = history
                 return "\n".join(text_parts), history
 
             history.append(
-                types.Content(role="model", parts=response.candidates[0].content.parts)
+                types.Content(role="model", parts=response.candidates[0].content.parts)  # type: ignore
             )
 
-            func_calls = response.function_calls
+            func_calls = response.function_calls  # type: ignore
             if not func_calls:
                 break
 
@@ -406,7 +262,7 @@ class RAGClient:
                         )
                     )
 
-            history.append(types.Content(role="tool", parts=tool_responses))
+            history.append(types.Content(role="tool", parts=tool_responses))  # type: ignore
             turn += 1
             time.sleep(10)
 
@@ -421,11 +277,13 @@ class RAGClient:
         query: str,
         num: int = 5,
         model_id: str | None = None,
-        search_type: Literal["lexical", "hybrid", "semantic"] = "lexical",
+        search_type: str | Literal["lexical", "hybrid", "semantic"] = "lexical",
         search_fields: Iterable[str] | None = None,
         boost_dict: dict = {},
         doc_id: str | None = None,
     ):
+        if self.default_boost_dict is not None:
+            boost_dict = self.default_boost_dict[index]
 
         if self.search_engine is None:
             raise RuntimeError("Search engine not initialized.")
@@ -493,8 +351,6 @@ def build_prompt(question: str, context: str):
 
 def gen_client() -> Client:
     load_dotenv()
-    client = Client(
-        # http_options={"timeout": 10},
-    )
+    client = Client()
 
     return client

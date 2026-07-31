@@ -9,6 +9,7 @@ Requests==2.34.2
 streamlit==1.59.2
 tqdm==4.68.3
 google-genai==2.10.0
+ipywidgets==8.1.8
 sentence-transformers[onnx]
 
 --extra-index-url https://download.pytorch.org/whl/cpu

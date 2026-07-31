@@ -68,7 +68,7 @@ class IGDB:
 
         self.headers = {
             "Client-ID": os.getenv("IGDB_CLIENT_ID"),
-            "Authorization": f"Bearer {info["access_token"]}",
+            "Authorization": f"Bearer {info['access_token']}",
         }
 
     def download(
@@ -98,10 +98,6 @@ class IGDB:
         if index is None:
             index = "index"
 
-        # index = "igdb_" + datetime.now().isoformat(sep="-", timespec="seconds").replace(
-        #     ":", ""
-        # )
-
         if model_id is None:
             model_id = get_models(self.opensearch_client)[0]
 
@@ -115,18 +111,6 @@ class IGDB:
                 "summary",
             ],
         )
-
-        # self.opensearch_client.indices.create(
-        #     index=index,
-        #     body={
-        #         "mappings": {
-        #             "dynamic": "true",
-        #         },
-        #         "settings": {
-        #             "number_of_replicas": 0,
-        #         },
-        #     },
-        # )
 
         for i in tqdm(range(1, max_id + (max_id % 500), 500)):
             b = GET_ALL_FIELDS_IN_ID_RANGE_BODY.format(min_id=i, max_id=i + 500)
@@ -169,7 +153,6 @@ def setup_vector_search(index_name, model_id):
                             "name": "name_vector",
                             "summary": "summary_vector",
                             "storyline": "storyline_vector",
-                            # "keywords": "keywords_vector",
                         },
                     }
                 }
@@ -202,7 +185,6 @@ def setup_vector_search(index_name, model_id):
                     "name_vector": vector_field,
                     "summary_vector": vector_field,
                     "storyline_vector": vector_field,
-                    # "keywords_vector": vector_field,
                 },
             },
         },
@@ -231,24 +213,10 @@ class Wikipedia:
         model_id: str | None = None,
         file_path: str | None = None,
     ) -> None:
-        """Ingests Wikipedia video game articles into OpenSearch.
-
-        Performs the ingestion of Wikipedia articles jointly with embedding.
-        It uses a simple keyword-matching approach to identify relevant articles.
-
-        Args:
-            index (str): The name of the OpenSearch index to create and populate.
-                Defaults to `"wikipedia"`.
-            model_id (str, optional): The ID of the ML model to use for embeddings.
-                If `None`, the first available model is used. Defaults to `None`.
-            file_path (str, optional): Path to a file where matched articles
-                will be saved in JSONL format. If `None`, no file is saved.
-                Defaults to `None`.
-        """
+        """Ingests Wikipedia video game articles into OpenSearch."""
         dataset = datasets.load_dataset(
             "wikimedia/wikipedia", "20231101.en", split="train"
         )
-        # Split keywords by signal strength
         strong_keywords = {
             "video game",
             "video games",
@@ -283,15 +251,11 @@ class Wikipedia:
             text_lower = article["text"].lower()
             title_lower = article["title"].lower()
 
-            # 1. Check Title: Very high signal
             title_match = any(
                 re.search(rf"\b{re.escape(kw)}\b", title_lower)
                 for kw in strong_keywords | brand_keywords
             )
 
-            # 2. Check Lead Text: Medium signal
-            # We require at least TWO matches in the lead text to reduce noise,
-            # OR one very strong keyword.
             lead_text = text_lower[:2000]
             strong_match = any(
                 re.search(rf"\b{re.escape(kw)}\b", lead_text) for kw in strong_keywords
@@ -304,10 +268,8 @@ class Wikipedia:
             )
 
             if title_match or strong_match or brand_matches >= 2:
-                # Save to file (no 'if' check needed thanks to NullFile)
                 f.write(json.dumps(article) + "\n")
 
-                # Prepare document for bulk indexing
                 batch.append(
                     {
                         "_index": index,
@@ -327,7 +289,6 @@ class Wikipedia:
                     batch = []
                     f.flush()
 
-        # Final batch upload
         if batch:
             bulk(self.opensearch_client, batch)
 
@@ -337,7 +298,18 @@ class Wikipedia:
 MODEL_PRICING = {
     "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.50},
     "gemini-3.5-flash-lite": {"input": 0.30, "output": 2.50},
-    "gemma-4-31b-it": {"input": 0.0, "output": 0.0},  # Gemma has no paid tier
+    "gemini-flash-lite-latest": {
+        "input": 0.30,
+        "output": 2.50,
+    },  # Points to 3.5 Flash-Lite
+    "gemini-3.5-flash": {"input": 1.50, "output": 9.00},
+    "gemini-3.6-flash": {"input": 1.50, "output": 7.50},
+    "gemini-flash-latest": {"input": 1.50, "output": 7.50},  # Points to 3.6 Flash
+    "gemma-4-26b-a4b-it": {
+        "input": 0.00,
+        "output": 0.00,
+    },  # Gemma models are open weights
+    "gemma-4-31b-it": {"input": 0.00, "output": 0.00},
 }
 
 
@@ -345,6 +317,7 @@ def save_usage_metadata(
     usage_metadata: GenerateContentResponseUsageMetadata | None,
     conn: pg.Connection | None,
     model: str,
+    custom_pricing: dict | None = None,
 ) -> None:
     """### Ingest usage
 
@@ -353,6 +326,7 @@ def save_usage_metadata(
             of the usage from the last query
         conn (Connection | None): connection to postgres server
         model (str): model's name
+        custom_pricing (dict | None): optional dictionary with 'input' and 'output' rates
     """
     if usage_metadata is None:
         return
@@ -384,7 +358,7 @@ def save_usage_metadata(
                 )
             """.strip())
 
-            cost = estimate_cost(model, usage_metadata)
+            cost = estimate_cost(model, usage_metadata, custom_pricing)
 
             cursor.execute(
                 """
@@ -403,9 +377,13 @@ def save_usage_metadata(
             )
 
 
-def estimate_cost(model: str, usage_metadata) -> float:
-    """Estimate USD cost for a single response. Returns 0.0 for unknown models."""
-    pricing = MODEL_PRICING.get(model)
+def estimate_cost(
+    model: str,
+    usage_metadata,
+    custom_pricing: dict | None = None, 
+) -> float:
+    """Estimate USD cost for a single response. Uses custom_pricing if provided."""
+    pricing = custom_pricing or MODEL_PRICING.get(model)
     if pricing is None:
         return 0.0
 
@@ -477,7 +455,7 @@ class OpenSearchBundler:
         print(f"✅ Metadata saved to {config_file}")
 
         query = {"query": {"match_all": {}}}
-        page = self.client.search(index=index, body=query, scroll="2m", size=1000) # type: ignore
+        page = self.client.search(index=index, body=query, scroll="2m", size=1000)  # type: ignore
 
         scroll_id = page["_scroll_id"]
         hits = page["hits"]["hits"]
@@ -491,7 +469,7 @@ class OpenSearchBundler:
                     f.write(json.dumps(doc) + "\n")
                     count += 1
 
-                page = self.client.scroll(scroll_id=scroll_id, scroll="2m") # type: ignore
+                page = self.client.scroll(scroll_id=scroll_id, scroll="2m")  # type: ignore
                 scroll_id = page["_scroll_id"]
                 hits = page["hits"]["hits"]
 
@@ -499,19 +477,30 @@ class OpenSearchBundler:
 
     def _deep_clean(self, data):
         """Recursively removes forbidden keys from nested dictionaries."""
-        # Stripping default_pipeline allows pre-embedded JSONL files to bulk-load without pipeline errors
-        forbidden = ["uuid", "creation_date", "version", "provided_name", "default_pipeline"]
+        forbidden = [
+            "uuid",
+            "creation_date",
+            "version",
+            "provided_name",
+            "default_pipeline",
+        ]
         if isinstance(data, dict):
             return {
-                k: self._deep_clean(v) 
-                for k, v in data.items() 
+                k: self._deep_clean(v)
+                for k, v in data.items()
                 if not any(word in k.lower() for word in forbidden)
             }
         elif isinstance(data, list):
             return [self._deep_clean(i) for i in data]
         return data
 
-    def import_index(self, data_file: str, config_file: str, new_index_name: str, force_reimport: bool = False):
+    def import_index(
+        self,
+        data_file: str,
+        config_file: str,
+        new_index_name: str,
+        force_reimport: bool = False,
+    ):
         print(f"🚀 Checking index status for: {new_index_name}...")
 
         # 1. Register search pipeline for RRF hybrid search
@@ -568,7 +557,9 @@ class OpenSearchBundler:
             try:
                 doc_count = self.client.count(index=new_index_name).get("count", 0)
                 if doc_count > 0:
-                    print(f"✅ Index '{new_index_name}' already exists with {doc_count} documents. Skipping import.")
+                    print(
+                        f"✅ Index '{new_index_name}' already exists with {doc_count} documents. Skipping import."
+                    )
                     return
             except Exception:
                 pass
@@ -593,10 +584,7 @@ class OpenSearchBundler:
         try:
             self.client.indices.create(
                 index=new_index_name,
-                body={
-                    "settings": sanitized_settings, 
-                    "mappings": mappings_data
-                },
+                body={"settings": sanitized_settings, "mappings": mappings_data},
             )
             print(f"✅ Index '{new_index_name}' created successfully.")
         except Exception as e:
@@ -613,135 +601,11 @@ class OpenSearchBundler:
 
         print(f"📦 Bulk loading documents into '{new_index_name}'...")
         success, failed = helpers.bulk(self.client, jsonl_generator())
-        print(f"✅ Successfully imported {success} documents into '{new_index_name}'. Failures: {failed}")
-# class OpenSearchBundler:
-#     def __init__(self, client: OpenSearch):
-#         self.client = client
+        print(
+            f"✅ Successfully imported {success} documents into '{new_index_name}'. Failures: {failed}"
+        )
 
-#     def export_index(self, index: str, data_file: str, config_file: str):
-#         """Exports index settings, mappings, and all documents.
 
-#         Args:
-#             index (str): Name of the index to export.
-#             data_file (str): Path to save the documents in .jsonl format.
-#             config_file (str): Path to save the metadata (settings and mappings) in .json format.
-#         """
-#         print(f"📦 Exporting index: {index}...")
-
-#         # 1. Export Settings and Mappings to a single JSON file
-#         settings = self.client.indices.get_settings(index=index)
-#         mappings = self.client.indices.get_mapping(index=index)
-
-#         config = {"settings": settings[index], "mappings": mappings[index]}
-
-#         with open(config_file, "w", encoding="utf-8") as f:
-#             json.dump(config, f, indent=4)
-#         print(f"✅ Metadata saved to {config_file}")
-
-#         # 2. Export Documents to JSONL (JSON Lines)
-#         # Use Scroll API to handle indices larger than 10k docs
-#         query = {"query": {"match_all": {}}}
-#         page = self.client.search(index=index, body=query, scroll="2m", size=1000) # type: ignore
-
-#         scroll_id = page["_scroll_id"]
-#         hits = page["hits"]["hits"]
-#         count = 0
-
-#         with open(data_file, "w", encoding="utf-8") as f:
-#             while len(hits) > 0:
-#                 for hit in hits:
-#                     doc = hit["_source"]
-#                     # Store the ID inside the document so we can restore it exactly
-#                     doc["_id"] = hit["_id"]
-#                     f.write(json.dumps(doc) + "\n")
-#                     count += 1
-
-#                 # Get the next batch of documents
-#                 page = self.client.scroll(scroll_id=scroll_id, scroll="2m") # type: ignore
-#                 scroll_id = page["_scroll_id"]
-#                 hits = page["hits"]["hits"]
-
-#         print(f"✅ {count} documents saved to {data_file}")
-
-#     def _deep_clean(self, data):
-#         """Recursively removes forbidden keys from nested dictionaries."""
-#         forbidden = ["uuid", "creation_date", "version", "provided_name"]
-#         if isinstance(data, dict):
-#             return {
-#                 k: self._deep_clean(v) 
-#                 for k, v in data.items() 
-#                 if not any(word in k.lower() for word in forbidden)
-#             }
-#         elif isinstance(data, list):
-#             return [self._deep_clean(i) for i in data]
-#         return data
-
-#     def import_index(self, data_file: str, config_file: str, new_index_name: str):
-#         print(f"🚀 Importing index into: {new_index_name}...")
-
-#         # 1. Register search pipeline for RRF hybrid search
-#         search_pipeline_body = {
-#             "description": "Modern RRF rank-blending search pipeline",
-#             "phase_results_processors": [
-#                 {
-#                     "score-ranker-processor": {
-#                         "combination": {
-#                             "technique": "rrf",
-#                             "parameters": {"rank_constant": 60},
-#                         }
-#                     }
-#                 }
-#             ],
-#         }
-#         try:
-#             self.client.search_pipeline.put(
-#                 id="search_pipeline", body=search_pipeline_body
-#             )
-#         except Exception:
-#             pass
-
-#         # 2. Load Configuration
-#         with open(config_file, "r", encoding="utf-8") as f:
-#             config = json.load(f)
-
-#         raw_settings = config["settings"].get("settings", {})
-#         sanitized_settings = self._deep_clean(raw_settings)
-
-#         mappings_data = config["mappings"]
-#         if "mappings" in mappings_data:
-#             mappings_data = mappings_data["mappings"]
-
-#         # 3. Delete existing index if it already exists (clears empty shells)
-#         if self.client.indices.exists(index=new_index_name):
-#             print(f"🗑️ Deleting existing index '{new_index_name}' to start clean import...")
-#             self.client.indices.delete(index=new_index_name)
-
-#         # 4. Create Index
-#         try:
-#             self.client.indices.create(
-#                 index=new_index_name,
-#                 body={
-#                     "settings": sanitized_settings, 
-#                     "mappings": mappings_data
-#                 },
-#             )
-#             print(f"✅ Index '{new_index_name}' created successfully.")
-#         except Exception as e:
-#             print(f"❌ Failed to create index '{new_index_name}': {e}")
-#             return
-
-#         # 5. Bulk Import Documents from JSONL
-#         def jsonl_generator():
-#             with open(data_file, "r", encoding="utf-8") as f:
-#                 for line in f:
-#                     doc = json.loads(line)
-#                     doc_id = doc.pop("_id", None)
-#                     yield {"_index": new_index_name, "_id": doc_id, "_source": doc}
-
-#         print(f"📦 Loading documents into '{new_index_name}'...")
-#         success, failed = helpers.bulk(self.client, jsonl_generator())
-#         print(f"✅ Successfully imported {success} documents into '{new_index_name}'. Failures: {failed}")
-    
 class PostgresBundler:
     def __init__(self, container_name="postgres", user="user", password="postgres"):
         self.container_name = container_name
@@ -749,16 +613,9 @@ class PostgresBundler:
         self.password = password
 
     def export_database(self, db_name: str, output_file: str):
-        """Exports a database using pg_dump via docker exec.
-
-        Args:
-            db_name (str): Name of the database (e.g., 'usage' or 'evaluations').
-            output_file (str): Path to save the .sql file.
-        """
+        """Exports a database using pg_dump via docker exec."""
         print(f"📦 Exporting database {db_name}...")
 
-        # We set the PGPASSWORD environment variable so pg_dump doesn't ask for a password
-        # The command is executed INSIDE the docker container and streamed to a local file
         cmd = f"docker exec -u postgres -e PGPASSWORD={self.password} {self.container_name} pg_dump -h localhost -U {self.user} {db_name}"
 
         try:
@@ -769,24 +626,18 @@ class PostgresBundler:
             print(f"❌ Export failed: {e}")
 
     def import_database(self, sql_file: str, db_name: str):
-        """
-        Imports a .sql file into a database via docker exec.
-        """
+        """Imports a .sql file into a database via docker exec."""
         print(f"🚀 Importing {sql_file} into database {db_name}...")
 
-        # 1. First, ensure the database exists (similar to your init-db.sh logic)
         create_db_cmd = f'docker exec -e PGPASSWORD={self.password} {self.container_name} psql -U {self.user} -d postgres -c "CREATE DATABASE {db_name};"'
 
         try:
-            # We ignore errors here in case the database already exists
             subprocess.run(create_db_cmd, shell=True, capture_output=True)
         except Exception:
             pass
 
-        # 2. Stream the .sql file into the psql tool inside the container
         try:
             with open(sql_file, "r") as f:
-                # We pipe the file content into the psql command
                 cmd = f"docker exec -i -e PGPASSWORD={self.password} {self.container_name} psql -U {self.user} -d {db_name}"
                 subprocess.run(cmd, shell=True, stdin=f, check=True)
             print(f"✅ Database {db_name} restored successfully.")
@@ -795,33 +646,9 @@ class PostgresBundler:
 
 
 if __name__ == "__main__":
-    # print(get_models(opensearch_client))
-
-    # from opensearch_utils import search
-
-    # num: int = 10
-    # results = search(
-    #     opensearch_client,
-    #     index="wikipedia",
-    #     query="What is the name of the game where you start as a prisioner in an undead asylum"
-    #     "and collect souls as currency and xp?",
-    #     num=num,
-    #     search_type="semantic",
-    #     search_fields=["title", "text"],
-    # )
-
-    # for i in range(num):
-    #     print(results["hits"]["hits"][i]["_source"]["title"])
     from opensearch_utils import setup_embedder
 
-    # model_id = setup_embedder(opensearch_client)
-
-    # igdb = IGDB(opensearch_client)
-    # igdb.pull_all(index="igdb", model_id=model_id)
     wikipedia = Wikipedia(opensearch_client)
-    # wikipedia.download_wikipedia(index="wikipedia", model_id=model_id, file_path="data/wikipedia.jsonl")
-
-    # wikipedia.download_wikipedia(file_path="data/wikipedia.jsonl")
 
     from evaluation import Evaluator
     from llm import RAGClient
@@ -835,57 +662,5 @@ if __name__ == "__main__":
 
     opensearch_bundler = OpenSearchBundler(opensearch_client)
 
-    # opensearch_bundler.export_index(index="wikipedia", data_file="data/wikipedia_index.jsonl", config_file="data/wikipedia_config.json")
-    # opensearch_bundler.export_index(index="igdb", data_file="data/igdb_index.jsonl", config_file="data/igdb_config.json")
-
     postgres_blunder = PostgresBundler()
-    # postgres_blunder.export_database("evaluations", "data/evaluations.sql")
     postgres_blunder.export_database("usage", "data/usage.sql")
-
-    # response = opensearch_client.search(
-    #     index="wikipedia",
-    #     body={
-    #         "size": 10000,
-    #         "query": {"match_all": {}},
-    #     },
-    # )
-
-    # ids = [r["_id"] for r in response["hits"]["hits"]]
-
-    # print("74599251" in ids)
-
-    # evaluator.generate_ground_truth(
-    #     index="wikipedia", count=3, n=20, file_path="data/wikipedia_ground_truth.csv"
-    # )
-    # wikipedia_ground_truth = evaluator.generate_ground_truth(
-    #     "wikipedia", 3, 300, "data/wikipedia_ground_truth.csv"
-    # )
-
-    # igdb_ground_truth = evaluator.generate_ground_truth(
-    #     "igdb", 3, 300, "data/igdb_ground_truth.csv"
-    # )
-
-    # result = rag_client.search(index="wikipedia", query="", doc_id="785")
-
-    # print(result)
-
-    # evaluator.ground_truth = pd.read_csv("data/wikipedia_ground_truth.csv")
-
-    # hr_score, mrr_score, x = evaluator.evaluate_search(index="wikipedia",search_type="hybrid")
-    # print(hr_score, mrr_score, x, sep="\n\n")
-
-    # judge = RAGClient(opensearch_client, model=model)
-
-    # # evaluator.ground_truth = pd.read_csv("data/igdb_ground_truth.csv")
-    # # evaluator.evaluate_agent(judge, overwrite=False, max_workers=1, index="igdb")
-
-    # evaluator.ground_truth = pd.read_csv("data/wikipedia_ground_truth.csv")
-    # evaluator.evaluate_agent(judge, overwrite=False, max_workers=1, index="wikipedia")
-
-    # rag_client.rag("Tell me about the game Dark Souls")
-
-    # save_usage_metadata(rag_client.usage_history[-1], None, model=model)
-    # print(result)
-    # Boosting optimization
-
-    # print(hr_score, mrr_score, x)

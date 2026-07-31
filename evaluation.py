@@ -336,11 +336,15 @@ class Evaluator:
     def generate_ground_truth(
         self,
         index: str,
-        count: int = 5,
-        n: int = 50,
+        questions_per_doc: int = 5,
+        num_docs: int = 50,
         file_path: str = "data/ground_truth.csv",
     ) -> pd.DataFrame:
-        """Generates questions/reasoning pairs from random documents."""
+        """Generates questions/reasoning pairs from random documents.
+
+        Args:
+            count (int, optional): The number of questions to generate per document. Defaults to `5`
+        """
         if not self.rag_client.search_engine:
             raise ValueError("Search engine not initialized.")
 
@@ -350,7 +354,7 @@ class Evaluator:
             "hits"
         ]
 
-        sampled_docs = random.sample(results, min(n, len(results)))
+        sampled_docs = random.sample(results, min(num_docs, len(results)))
         all_data = []
 
         with ThreadPoolExecutor(max_workers=2) as executor:
@@ -366,7 +370,9 @@ class Evaluator:
                     ]
                 )
 
-                f = executor.submit(call_llm, self.rag_client, context, count)
+                f = executor.submit(
+                    call_llm, self.rag_client, context, questions_per_doc
+                )
                 future_to_doc[f] = doc["_id"]
 
             for future in tqdm(
@@ -394,7 +400,9 @@ class Evaluator:
     def evaluate_search(
         self,
         index="igdb",
-        search_type: Literal["lexical", "hybrid", "semantic"] = "lexical",
+        search_type: str | Literal["lexical", "hybrid", "semantic"] = "lexical",
+        num=5,
+        boost_dict={},
     ) -> tuple[float, float, pd.DataFrame]:
         if self.ground_truth.empty:
             raise ValueError("ground_truth is empty, must set a value")
@@ -404,7 +412,11 @@ class Evaluator:
         return metrics.evaluate_search(
             self.ground_truth,
             lambda query: self.rag_client.search(
-                index=index, query=query, search_type=search_type
+                index=index,
+                query=query,
+                search_type=search_type,
+                num=num,
+                boost_dict=boost_dict,
             ),
         )
 
