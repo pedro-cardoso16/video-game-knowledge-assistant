@@ -17,7 +17,7 @@ pleasant execution boundaries.
 import time
 import json
 import base64
-
+import random
 from tqdm import tqdm
 from opensearchpy import OpenSearch, exceptions
 from typing import Iterable, Literal
@@ -30,12 +30,38 @@ def get_active_model_id(opensearch_client: OpenSearch) -> str | None:
     """Fetches and caches the active model ID to prevent spamming OpenSearch."""
     global _CACHED_MODEL_ID
     if _CACHED_MODEL_ID is not None:
-        return _CACHED_MODEL_ID
+        try:
+            # Verify the cached model is actually DEPLOYED
+            response = opensearch_client.transport.perform_request(
+                "GET", f"/_plugins/_ml/models/{_CACHED_MODEL_ID}"
+            )
+            state = response.get("model_state") or response.get("state")
+            if state == "DEPLOYED":
+                return _CACHED_MODEL_ID
+            print(f"Cached model {_CACHED_MODEL_ID} is in state {state}, refreshing...")
+        except Exception as e:
+            print(f"Error verifying cached model: {e}. Refreshing...")
+        
+        _CACHED_MODEL_ID = None
 
     models = get_models(opensearch_client)
-    if models:
-        _CACHED_MODEL_ID = models[0]
-    return _CACHED_MODEL_ID
+    if not models:
+        return None
+
+    # Instead of blindly taking models[0], find the first one that is actually DEPLOYED
+    for model_id in models:
+        try:
+            response = opensearch_client.transport.perform_request(
+                "GET", f"/_plugins/_ml/models/{model_id}"
+            )
+            state = response.get("model_state") or response.get("state")
+            if state == "DEPLOYED":
+                _CACHED_MODEL_ID = model_id
+                return model_id
+        except Exception:
+            continue
+            
+    return None
 
 
 def create_index_with_semantic_search(
@@ -463,41 +489,25 @@ def search(
     if fields[0] == "*":
         fields = get_searchable_text_fields(opensearch_client, index)
 
-    # USE CACHED MODEL ID (Does not execute an extra HTTP request)
+    # USE CACHED MODEL ID
     if model_id is None:
         model_id = get_active_model_id(opensearch_client)
 
-    # if model_id is None:
-    #     models = get_models(opensearch_client)
-    #     model_id = models[0] if models else None
+    # Retry logic for Memory Circuit Breaker
+    max_retries = 5
 
-    query_block = {}
+    for attempt in range(max_retries):
+        try:
+            query_block = {}
 
-    match search_type:
-        case "lexical":
-            boosted_fields = [f"{f}^{boost_dict.get(f, 1)}" for f in fields]
-            query_block = {"multi_match": {"query": query, "fields": boosted_fields}}
+            match search_type:
+                case "lexical":
+                    boosted_fields = [f"{f}^{boost_dict.get(f, 1)}" for f in fields]
+                    query_block = {"multi_match": {"query": query, "fields": boosted_fields}}
 
-        case "semantic":
-            vector_fields = get_vector_fields(opensearch_client, index)
-            should_queries = [
-                {
-                    "neural": {
-                        f"{vec_field}": {
-                            "query_text": query,
-                            "model_id": model_id,
-                        }
-                    }
-                }
-                for vec_field in vector_fields
-            ]
-            query_block = {"bool": {"should": should_queries}}
-
-        case "hybrid":
-            vector_fields = get_vector_fields(opensearch_client, index)
-            neural_part = {
-                "bool": {
-                    "should": [
+                case "semantic":
+                    vector_fields = get_vector_fields(opensearch_client, index)
+                    should_queries = [
                         {
                             "neural": {
                                 f"{vec_field}": {
@@ -508,30 +518,56 @@ def search(
                         }
                         for vec_field in vector_fields
                     ]
-                }
+                    query_block = {"bool": {"should": should_queries}}
+
+                case "hybrid":
+                    vector_fields = get_vector_fields(opensearch_client, index)
+                    neural_part = {
+                        "bool": {
+                            "should": [
+                                {
+                                    "neural": {
+                                        f"{vec_field}": {
+                                            "query_text": query,
+                                            "model_id": model_id,
+                                        }
+                                    }
+                                }
+                                for vec_field in vector_fields
+                            ]
+                        }
+                    }
+
+                    boosted_fields = [f"{f}^{boost_dict.get(f, 1)}" for f in fields]
+                    query_block = {
+                        "hybrid": {
+                            "queries": [
+                                {"multi_match": {"query": query, "fields": boosted_fields}},
+                                neural_part,
+                            ],
+                        },
+                    }
+
+                case _:
+                    raise ValueError(
+                        "Invalid search_type value, must be 'lexical', 'semantic' or 'hybrid'."
+                    )
+
+            body = {
+                "size": num,
+                "query": query_block,
             }
 
-            boosted_fields = [f"{f}^{boost_dict.get(f, 1)}" for f in fields]
-            query_block = {
-                "hybrid": {
-                    "queries": [
-                        {"multi_match": {"query": query, "fields": boosted_fields}},
-                        neural_part,
-                    ],
-                },
-            }
+            return opensearch_client.search(index=index, body=body)
 
-        case _:
-            raise ValueError(
-                "Invalid search_type value, must be 'lexical', 'semantic' or 'hybrid'."
-            )
+        except exceptions.OpenSearchException as e:
+            if "circuit_breaking_exception" in str(e).lower() and attempt < max_retries - 1:
+                retry_delay = 5 + random.random()
 
-    body = {
-        "size": num,
-        "query": query_block,
-    }
-
-    return opensearch_client.search(index=index, body=body)
+                print(f"\n⚠️ Circuit Breaker hit in search! Retry {attempt+1}/{max_retries}. Waiting {retry_delay}s...")
+                time.sleep(retry_delay)
+                continue
+            raise e
 
     # def search(
     #     opensearch_client: OpenSearch,
@@ -649,14 +685,14 @@ def search(
     #     return opensearch_client.search(index=index, body=body)
 
     # def get_vector_fields(opensearch_client: OpenSearch, index_name: str) -> list[str]:
-    """Retrieves all field names from an index that end with '_vector'."""
-    # 1. Fetch the mapping for the index
-    response = opensearch_client.indices.get_mapping(index=index_name)
+    # """Retrieves all field names from an index that end with '_vector'."""
+    # # 1. Fetch the mapping for the index
+    # response = opensearch_client.indices.get_mapping(index=index)
 
-    # 2. Navigate the response structure: {index_name}: {mappings: {properties: {...}}}
-    properties = response[index_name].get("mappings", {}).get("properties", {})
+    # # 2. Navigate the response structure: {index_name}: {mappings: {properties: {...}}}
+    # properties = response[index].get("mappings", {}).get("properties", {})
 
-    # 3. Filter for fields ending in '_vector'
-    vector_fields = [field for field in properties.keys() if field.endswith("_vector")]
+    # # 3. Filter for fields ending in '_vector'
+    # vector_fields = [field for field in properties.keys() if field.endswith("_vector")]
 
-    return vector_fields
+    # return vector_fields

@@ -219,31 +219,6 @@ class Evaluator:
             if batch:
                 self._save_eval_batch(batch)
 
-            # # Process in threads
-            # with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            #     futures = {
-            #         executor.submit(self._process_single_evaluation, x, judge, index): x
-            #         for x in questions_to_process
-            #     }
-
-            #     batch = []
-            #     batch_size = 1  # Save every 1 result(s) to DB
-
-            #     for future in tqdm(
-            #         as_completed(futures), total=len(futures), desc="Evaluating"
-            #     ):
-            #         result = future.result()
-            #         if result:
-            #             batch.append(result)
-
-            #         if len(batch) >= batch_size:
-            #             print("Batch completed. Saving to database.")
-            #             self._save_eval_batch(batch)
-            #             batch = []
-
-            #     if batch:
-            #         self._save_eval_batch(batch)
-
         finally:
             conn.close()
 
@@ -259,15 +234,9 @@ class Evaluator:
                 index=index, query="", doc_id=item["doc_id"]
             )
 
-            # reference_doc_temp = [
-            #     data
-            #     for data in reference_doc["_source"]
-            #     if data in ("title", "name", "summary", "text")
-            # ]
-
             reference_doc_temp = {
                 key: val
-                for key, val in reference_doc["_source"].items()
+                for key, val in reference_doc["_source"].items()  # type: ignore
                 if key in ("title", "name", "summary", "text", "storyline")
             }
             reference_doc = reference_doc_temp
@@ -403,6 +372,7 @@ class Evaluator:
         search_type: str | Literal["lexical", "hybrid", "semantic"] = "lexical",
         num=5,
         boost_dict={},
+        max_workers=3,
     ) -> tuple[float, float, pd.DataFrame]:
         if self.ground_truth.empty:
             raise ValueError("ground_truth is empty, must set a value")
@@ -418,230 +388,8 @@ class Evaluator:
                 num=num,
                 boost_dict=boost_dict,
             ),
+            max_workers=max_workers,
         )
-
-
-# class Evaluator:
-#     def __init__(self, rag_client: RAGClient, ground_truth: pd.DataFrame | None = None):
-#         self.rag_client = rag_client
-#         if ground_truth is None:
-#             self.ground_truth: pd.DataFrame = pd.DataFrame()
-
-
-#     def evaluate_agent(self, judge: RAGClient, overwrite: bool = False) -> None:
-#         """## Evaluate Agent
-
-#         Performs the tools usage and RAG's final answer evaluations.
-
-#         Args:
-#             judge (RAGClient): LLM client that will be the judge (evaluator) that is in independent from the evaluated model.
-
-#         Returns:
-#             None
-#         """
-#         ground_truth = self.ground_truth.to_dict(orient="records")
-
-#         conn = pg.connect(
-#             dbname="evaluations",
-#             user="user",
-#             password="postgres",
-#             host="localhost",
-#             port="5432",
-#         )
-#         # conn = sql.connect("data/evaluations.sql")
-
-#         with conn:
-#             with conn.cursor() as cursor:
-#                 if overwrite:
-#                     cursor.execute("DELETE FROM evaluations")
-
-#                 cursor.execute("""
-#                     CREATE TABLE IF NOT EXISTS evaluations (
-#                         id SERIAL PRIMARY KEY,
-#                         source TEXT,
-#                         question TEXT,
-#                         answer TEXT,
-#                         reasoning TEXT,
-#                         answer_score TEXT,
-#                         tool_score TEXT
-#                     )
-#                     """.strip())
-
-#                 # --- Step 2: Resume Capability ---
-#                 # Fetch already evaluated questions to avoid duplicates and save tokens
-#                 cursor.execute("SELECT question FROM evaluations")
-#                 evaluated_questions = {row[0] for row in cursor.fetchall()}
-
-#                 results_to_insert = []
-
-#                 # --- Step 3: Controlled Parallelism ---
-#                 # Use ThreadPoolExecutor with limited workers to maximize throughput without hitting 429s
-#                 def process_question(x):
-#                     try:
-
-#                         answer = self.rag_client.rag(x["question"])
-#                         context = self.rag_client.last_history
-
-#                         eval_res = None
-#                         retries = 0
-#                         max_retries = 5
-
-#                         # Mandatory delay to stay under RPM limits and avoid 429s
-#                         time.sleep(5)
-
-#                         while retries < max_retries:
-#                             try:
-#                                 response = judge.llm(
-#                                     JUDGE_PROMPT.format(
-#                                         question=x["question"], answer=answer, context=context
-#                                     ),
-#                                     config=dict(
-#                                         GenerateContentConfig(
-#                                             system_instruction=EVALUATE_AGENT_INSTRUCTION,
-#                                             response_mime_type="application/json",
-#                                             response_schema=EvaluationResult,
-#                                         )
-#                                     ),
-#                                 )
-
-#                                 if response and response.parsed is not None:
-#                                     eval_res = EvaluationResult.model_validate(response.parsed)
-#                                     break
-
-#                                 print(f"Schema violation for question {x['question'][:20]}... Retrying...")
-#                             except Exception as e:
-#                                 if "429" in str(e):
-#                                     wait_time = 30 * (2**retries)
-#                                     print(f"Quota exceeded (429). Retrying in {wait_time} seconds...")
-#                                 else:
-#                                     print(f"LLM call failed: {e}. Retrying in 4s...")
-#                                     wait_time = 4
-#                                 time.sleep(wait_time)
-
-#                             retries += 1
-
-#                         if eval_res:
-#                             return (
-#                                 "judge",
-#                                 x["question"],
-#                                 answer,
-#                                 eval_res.reasoning,
-#                                 eval_res.answer_score,
-#                                 eval_res.tool_score,
-#                             )
-#                     except Exception as e:
-#                         print(f"Error processing question {x['question'][:20]}: {e}")
-#                     return None
-
-#                 # Filter items that need evaluation
-#                 questions_to_process = [x for x in ground_truth if x["question"] not in evaluated_questions]
-
-#                 with ThreadPoolExecutor(max_workers=1) as executor:
-#                     # Use tqdm to track progress of the parallel execution
-#                     futures = [executor.submit(process_question, x) for x in questions_to_process]
-#                     for future in tqdm(as_completed(futures), total=len(futures), desc="Parallel LLM judge evaluation"):
-#                         res = future.result()
-#                         if res:
-#                             results_to_insert.append(res)
-
-#                 if results_to_insert:
-#                     cursor.executemany(
-#                         """INSERT INTO evaluations (
-#                         source,
-#                         question,
-#                         answer,
-#                         reasoning,
-#                         answer_score,
-#                         tool_score) VALUES (%s, %s, %s, %s, %s, %s)
-#                         """.strip(),
-#                         results_to_insert,
-#                     )
-
-#                 cursor.execute(
-#                     """
-#                     SELECT * FROM evaluations
-#                     """.strip(),
-#                 )
-#                 print(cursor.fetchall())
-
-#         conn.close()
-
-#     def generate_ground_truth(
-#         self,
-#         index: str,
-#         count: int = 5,
-#         n: int = 100,
-#         file_path: str = "data/ground_truth.csv",
-#     ) -> pd.DataFrame:
-#         """Generate ground truth.
-
-#         Args:
-#             index_name (str): Name of the OpenSearch index.
-#             count (int, optional): Number of questions to generate per document. Defaults to `5`.
-#             n (int, optional): Number of randomly selected documents. Defaults to `100`.
-
-#         Returns:
-#             pd.DataFrame: DataFrame with columns `question` and `doc_id`.
-#         """
-#         # Use a list to collect results for DataFrame conversion at the end
-#         all_data = []
-#         body = {
-#             "size": 10000,
-#             "query": {
-#                 "match_all": {},
-#             },
-#         }
-
-#         if self.rag_client.search_engine is None:
-#             raise ValueError("Invalid search_engine in rag_client")
-
-#         results = self.rag_client.search_engine.search(body=body, index=index)["hits"]["hits"]
-
-
-#         results = random.sample(results, n)
-
-#         with ThreadPoolExecutor(max_workers=2) as executor:
-#             futures_map = {}
-
-#             for result in tqdm(results, desc="Submitting tasks", leave=False):
-#                 source = result["_source"]
-#                 doc_id = result["_id"]
-
-#                 context = "\n".join(
-#                     [
-#                         f"{key}:\n{str(val)}"
-#                         for key, val in source.items()
-#                         if isinstance(val, (str, int, float))
-#                     ]
-#                 )
-
-#                 future = executor.submit(call_llm, self.rag_client, context, count)
-#                 futures_map[future] = doc_id
-
-#             for future in tqdm(
-#                 as_completed(futures_map),
-#                 total=len(futures_map),
-#                 desc="Generating Ground Truth",
-#             ):
-#                 try:
-#                     result = future.result()
-#                     doc_id = futures_map[future]
-
-#                     # Create rows for each generated question
-#                     for q, r in zip(result.questions, result.reasonings):
-#                         all_data.append({"question": q, "reasoning": r, "doc_id": doc_id})
-
-#                     # Incremental save: Save current progress to CSV to prevent data loss on crash
-#                     temp_df = pd.DataFrame(all_data)
-#                     temp_df.to_csv(file_path, index=False, quotechar='"')
-
-#                 except Exception as e:
-#                     print(f"Error generating ground truth for a document: {e}")
-
-#         df = pd.DataFrame(all_data)
-#         df.to_csv(file_path, index=False, quotechar='"')
-
-#         return df
 
 
 def call_llm(rag_client: RAGClient, context: str, count: int):

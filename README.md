@@ -9,12 +9,25 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Acknowledgments
-This project was developed as part of the LLM Zoomcamp cohort leaded by instructor [@alexeygrigorev](https://github.com/alexeygrigorev).
-Special thanks to the [DataTalksClub/llm-zoomcamp](https://github.com/DataTalksClub/llm-zoomcamp) community for providing the resources and framework for this project.
+This project was developed as part of the LLM Zoomcamp 2026 cohort leaded by instructor [@alexeygrigorev](https://github.com/alexeygrigorev).
+Special thanks to the [DataTalksClub/llm-zoomcamp](https://github.com/DataTalksClub/llm-zoomcamp) community for providing the resources for this project.
 
 # Video game knowledge assistant
-Get fast reviews of video games using an extensive aggregated source of metadata and reviews from 
-IGDB and Wikipedia.
+
+Finding comprehensive game data is often fragmented: structured metadata 
+(ratings, dates) live in IGDB, while deep lore and history are scattered across 
+Wikipedia. Manually synthesizing these sources is tedious.
+
+The **Video game knowledge assistant** is an all-in-one agent that aggregates 
+    these sources through a strategic RAG pipeline, offering:
+* **Multi-source synthesis**: Merges structured metadata with unstructured lore.
+* **Complex Reasoning**: Handles multi-step workflows (e.g., analyzing a game's 
+    traits to find similar titles).
+* **Optimized Retrieval**: Uses hybrid search (lexical + semantic) to accurately 
+    capture both specific titles and broad conceptual themes.
+
+This agent acts as a centralized expert, eliminating "tab-bloat" and providing 
+fast, evidence-based answers for any gaming curiosity.
 
 
 ## Getting started

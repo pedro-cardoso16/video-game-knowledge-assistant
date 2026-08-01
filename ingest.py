@@ -28,7 +28,6 @@ from opensearch_utils import create_index_with_semantic_search, get_models
 
 from concurrent.futures import ThreadPoolExecutor
 from tqdm import tqdm
-from query import opensearch_client
 from dotenv import load_dotenv
 
 opensearch_client = OpenSearch(

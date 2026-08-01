@@ -10,6 +10,7 @@ from google.genai.errors import APIError
 from dotenv import load_dotenv, get_key
 from typing import ParamSpec, TypeVar, Callable, Literal, Iterable
 
+
 INSTRUCTION = """
 You are a specialized Video Game Knowledge Assistant. Your primary goal is to provide 
 factually accurate information sourced EXCLUSIVELY from the provided search tools.
@@ -35,6 +36,7 @@ factually accurate information sourced EXCLUSIVELY from the provided search tool
 4. **SEARCH TACTICS & RETRIES**:
    - Use `igdb` for structured metadata, ratings, summaries, and storylines.
    - Use `wikipedia` for historical or broader contextual queries.
+   - Whenever possible, query ALL available indices (both `igdb` and `wikipedia`) to synthesize a more comprehensive and complete answer.
    - If `lexical` search yields no results for a title, retry using `hybrid` or `semantic` search.
 
 5. **EVIDENCE-BASED RESPONSES**:

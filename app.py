@@ -96,7 +96,7 @@ def load_usage_data():
 
 
 @st.cache_data(ttl=600)
-def load_feedback_data():
+def load_user_feedback_data():
     query = """
         SELECT question, answer, answer_score, created_at
         FROM evaluations
@@ -118,6 +118,28 @@ def load_feedback_data():
         st.error(f"Database error: {e}")
         return pd.DataFrame()
 
+@st.cache_data(ttl=600)
+def load_judge_feedback_data():
+    query = """
+        SELECT question, answer, reasoning, answer_score, tool_score, created_at
+        FROM evaluations
+        WHERE source = 'judge'
+        ORDER BY created_at
+    """
+    try:
+        with get_eval_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(query)
+                rows = cursor.fetchall()
+                if cursor.description is None:
+                    return pd.DataFrame()
+                columns = [desc[0] for desc in cursor.description]
+        return pd.DataFrame(rows, columns=columns)
+    except pg.errors.UndefinedTable:
+        return pd.DataFrame()
+    except Exception as e:
+        st.error(f"Database error: {e}")
+        return pd.DataFrame()
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="Video Game Knowledge Assistant", page_icon="🎮")
@@ -294,7 +316,7 @@ with analytics_tab:
 
     if st.button("🔄 Refresh Data"):
         load_usage_data.clear()
-        load_feedback_data.clear()
+        load_user_feedback_data.clear()
 
     df = load_usage_data()
 
@@ -418,7 +440,7 @@ with analytics_tab:
     st.divider()
     st.subheader("User Feedback & Satisfaction")
 
-    feedback_df = load_feedback_data()
+    feedback_df = load_user_feedback_data()
 
     if feedback_df is None or feedback_df.empty:
         st.info("No user feedback yet.")

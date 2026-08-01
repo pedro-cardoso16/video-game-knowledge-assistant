@@ -2,6 +2,7 @@
 
 This document tracks improvements to make the **Video Game Knowledge Assistant** more presentable.
 
+* [ ] Finish the search evaluation demonstration.
 ---
 
 ## 📁 1. README.md Improvements
