@@ -4,10 +4,15 @@
 cd /app
 
 echo "Waiting for OpenSearch to be ready..."
-# Poll OpenSearch until it responds to a basic request
-until curl -s http://opensearch:9200 > /dev/null; do
-  echo "OpenSearch is unavailable - sleeping"
-  sleep 2
+# Poll OpenSearch until it responds to a basic request with auth
+OPENSEARCH_HOST=${OPENSEARCH_HOST:-opensearch}
+OPENSEARCH_PORT=${OPENSEARCH_PORT:-9200}
+OPENSEARCH_USER=${OPENSEARCH_USER:-admin}
+OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-Opensearch16admin#}
+
+until curl -s -u "$OPENSEARCH_USER:$OPENSEARCH_PASSWORD" "http://$OPENSEARCH_HOST:$OPENSEARCH_PORT/" > /dev/null; do
+  echo "OpenSearch is unavailable - waiting initialization"
+  sleep 15
 done
 
 echo "OpenSearch is up! Importing data..."
