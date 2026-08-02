@@ -4,14 +4,18 @@ FILE_NAME=".env"
 read -r -d '' FILE_TEMPLATE << 'EOM'
 # --- Gemini ---
 GEMINI_API_KEY='<your_api_key>'
+
 # --- IGDB ---
 # Only fill these ones if you intend to ingest IGDB data yourself.
 IGDB_CLIENT_ID='<optional_api_key>'
 IGDB_CLIENT_SECRET='<optional_client_secret>'
+
 # Do not change the fields below
+
 # --- Postgres ---
 POSTGRES_PASSWORD=postgres
 POSTGRES_USER=user
+
 # --- Opensearch ---
 OPENSEARCH_USER=admin
 OPENSEARCH_PASSWORD='Opensearch16admin#'

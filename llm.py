@@ -79,7 +79,7 @@ def opensearch_search(
         num (int): Number of results to return.
         model_id (str): The embedding model ID for semantic search.
         search_type (str): Type of search to perform.
-        search_fields (Iterable[str]): Fields to search in.
+        search_fields (Iterable[str]): Fields to search in. Don't
     """
     # This is just a signature for the LLM.
     # The actual execution is handled by the agent loop.

@@ -40,6 +40,14 @@ services:
       - opensearch-data:/usr/share/opensearch/data
     networks:
       - games
+    depends_on:
+      init-opensearch-data:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -u admin:$$OPENSEARCH_INITIAL_ADMIN_PASSWORD http://localhost:9200/ > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   postgres:
     image: postgres:17
@@ -55,6 +63,11 @@ services:
       - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
     networks:
       - games
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d games"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   sagebot:
     container_name: sagebot
@@ -74,6 +87,13 @@ services:
       - .env
     volumes:
       - ./data:/app/data
+    depends_on:
+      init-opensearch-data:
+        condition: service_completed_successfully
+      opensearch:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
 
 networks:
   games:

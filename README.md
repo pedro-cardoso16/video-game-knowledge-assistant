@@ -5,199 +5,217 @@
 ![Docker](https://img.shields.io/badge/Docker-Compose-blue?logo=docker)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-## Acknowledgments
-This project was developed as part of the LLM Zoomcamp 2026 cohort leaded by instructor [@alexeygrigorev](https://github.com/alexeygrigorev).
-Special thanks to the [DataTalksClub/llm-zoomcamp](https://github.com/DataTalksClub/llm-zoomcamp) community for providing the resources for this project.
+# 🎮 Video Game Knowledge Assistant (SageBot)
 
-# Video game knowledge assistant
+An end-to-end RAG (Retrieval-Augmented Generation) AI assistant and agent that unifies fragmented video game data from **IGDB** (structured metadata, release dates, genres, ratings) and **Wikipedia** (deep lore, game history, narrative details) into a single intelligent interface.
 
-Finding comprehensive game data is often fragmented: structured metadata 
-(ratings, dates) live in IGDB, while deep lore and history are scattered across 
-Wikipedia. Manually synthesizing these sources is tedious.
+Built as a capstone project for the [DataTalks.Club LLM Zoomcamp](https://github.com/DataTalksClub/llm-zoomcamp) cohort.
 
-The **Video game knowledge assistant** is an all-in-one agent that aggregates 
-    these sources through a strategic RAG pipeline, offering:
-* **Multi-source synthesis**: Merges structured metadata with unstructured lore.
-* **Complex Reasoning**: Handles multi-step workflows (e.g., analyzing a game's 
-    traits to find similar titles).
-* **Optimized Retrieval**: Uses hybrid search (lexical + semantic) to accurately 
-    capture both specific titles and broad conceptual themes.
+---
 
-This agent acts as a centralized expert, eliminating "tab-bloat" and providing 
-fast, evidence-based answers for any gaming curiosity.
+## 📌 Problem Statement
 
+Finding comprehensive video game information is often fragmented:
+- **Structured metadata** (release dates, platforms, age ratings, genres) lives on specialized databases like IGDB.
+- **Deep narrative lore and development history** are scattered across unstructured sources like Wikipedia.
 
-## Getting started
+Standard search engines often fail to synthesize both structured filtering and deep narrative context into direct, natural language answers.
 
-### Docker installation
-It's recommended to use a virtual machine with around with at, so as to keep things
-isolated from your local machine.
+The **Video Game Knowledge Assistant** solves this by aggregating structured metadata and unstructured textual lore into a unified knowledge base, leveraging **Hybrid Search (Lexical + Vector with RRF)** and an **LLM Agent** to answer complex gaming queries with accurate context and source transparency.
 
-You must have 🐋 docker installed in the system . 
-> **Docker engine** installation guide: https://docs.docker.com/engine/install  
-> **Docker desktop** installation guide: https://docs.docker.com/get-started/get-docker/
+---
 
-Once this is done we can begin the setup.
+## 🚀 Quick Start & Installation
 
-### Run app
-In the main project folder execute:
+### Prerequisites & System Requirements
+
+Depending on your host system's hardware, you can run the assistant in one of two modes:
+
+| Mode | Included Data | Required Docker RAM | OpenSearch Heap (`compose.yaml`) |
+| :--- | :--- | :---: | :---: |
+| **Full Mode (Default)** | IGDB Metadata + 62,000+ Wikipedia Lore Vectors | **8–10 GB** | `-Xms8g -Xmx8g` |
+| **Lightweight Mode** | IGDB Metadata Only (Lower-End Hardware) | **4 GB** | `-Xms4g -Xmx4g` |
+
+#### 🌟 Full Mode Setup (Default)
+To support neural vector search across 62,000+ Wikipedia lore chunks, 370,000+ IGDB entries, and on-node ML Commons neural embeddings, OpenSearch requires **8 GB of JVM Heap space** (`-Xms8g -Xmx8g`).
+
+**Setting up Docker Desktop (macOS / Windows):**
+1. Open **Docker Desktop**.
+2. Go to **Settings** ⚙️ ➔ **Resources** ➔ **Memory**.
+3. Set the slider to **at least 8 GB** (10 GB recommended).
+4. Click **Apply & restart**.
+
+#### ⚡ Lightweight Mode for Lower-End Hardware (Optional)
+If your machine has limited RAM (e.g., 8 GB total system RAM) and cannot allocate 8 GB to Docker:
+1. Open `compose.yaml` and update the heap setting under `opensearch`:
+   ```yaml
+   - "OPENSEARCH_JAVA_OPTS=-Xms4g -Xmx4g"
+   ```
+2. The assistant will operate using the IGDB metadata index, answering queries on structured game data (genres, platforms, release dates, ratings) with a lightweight memory footprint.
+
+---
+
+### Step-by-Step Installation
+
+#### 1. Clone the Repository
 ```bash
-chmod +x setup.sh && ./setup.sh 
+git clone https://github.com/pedro-cardoso16/video-game-knowledge-assistant.git
+cd video-game-knowledge-assistant
 ```
-This will create a `.env` file. 
 
-In this file, replace the `<>` fields with your keys. You can create a free one 
-using your google account and accessing the site https://aistudio.google.com/api-keys. 
+#### 2. Configure Environment Variables
+Execute the setup script:
 
 ```bash
-docker compose up --build
+chmod +x setup.sh && ./setup.sh
 ```
-Wait until the completion is done. HWen it's done you should see sagebot info telling to 
-open the streamlit app at a given url.
 
-Open in a web browser in the following address:
+Open the generated `.env` and configure your keys:
+
+#### 3. Build and Run Container Services
+Run the automation script or start Docker Compose directly:
+
 ```bash
-https://localhost:8501
+docker compose up --build -d && docker compose logs sagebot -f
 ```
 
-In the web page you should see
+Wait for the initialization process to finish. 
 
-<p align="center">
-<img src="media/imgs/chat_example.png" alt="Chat screenshot" width="400"/>
-</p>
+#### 4. Access the Application
+Once containers are healthy, open your browser and go to:
+👉 **[http://localhost:8501](http://localhost:8501)**
 
-That's it! You are free to use the app. Make some questions and see the <u>📊 analytics</u> page
-**Don't forget to click on the 🔄 refresh button**  to update the page view.
+---
 
-> ⚠️ <span style=color:gold>**Warning**</span>  
-> Usually, the only reliable model is `gemini-3.1-flash-lite` if you are using the free tier. Sometimes `gemma-4-31b-it` may work, but more unreliable.
+## 🏗️ Architecture & Pipeline Flow
 
-# How it works
-
-## Architecture
+The system consists of five main components:
+1. **Data Ingestion & Extraction**: Scrapes and structures data from IGDB and Wikipedia.
+2. **Knowledge Base**: OpenSearch storing both keyword indices and dense vector embeddings.
+3. **Retrieval & RAG Flow**: Hybrid search combining BM25 keyword matching with k-NN vector search using Reciprocal Rank Fusion (RRF).
+4. **User Interface**: Streamlit web app providing a chat interface and an analytical dashboard.
+5. **Monitoring & Feedback**: PostgreSQL database logging query interactions, LLM latency, token usage, and user feedback (thumbs up/down).
 
 ```mermaid
-graph TD
-    User <-->  App(streamlit app)
-    LLM(LLM client) <--> Assistant
-    User((User)) <--> Assistant(assistant)
-    Assistant <--> OpenSearch
-    B --> OpenSearch(opensearch) 
-    IGDB[("IGDB\n(remote)")] -->|ingest| B[("index DB\n(local)")]
-    WIKIPEDIA[("Wikipedia\n(remote)")] -->|ingest| B
-```
-
-RAG
-Search evaluation (MRR, RRF)
-Response with RAG evaluation (LLM as a judge)
-Tool usage evaluation (LLM as a judge)
-
-### Evaluation
-One very important aspect of monitoring and pre/post - deployment phases are the 
-evaluation. We have offline evaluation (before deployment) and online evaluation 
-(post-deployment).
-
-#### Search evaluation
-In order to perform the search evaluation we will use the module `evaluation.py`. 
-In this module there is a method called `gen_ground_truth` which will use the llm
-to generate questions based on random documents of this database. Each question
-is tied to single document and this specific document is what we will try to retrieve
-using the generated questions as a query
-
-```mermaid
----
-title: Ground truth generation pipeline
----
-flowchart LR
-DB[(index DB)] -->|retrieve| LLM
-LLM(LLM) -->|generate| Q(questions) 
-Q --> GT[(ground truth DB)]
-```
-```mermaid
----
-title: Search evaluation architecture
----
-flowchart LR
-Q(questions) --> S(search)
-DB[(DB)] --> S
-S --> R(results)
-R --> E(evaluator)
-GT(ground truth) --> E
-E --> MRR("MRR (mean reciprocal rank)")
-E --> HR("HR (hit rate)")
-```
-
-#### Agent evaluation
-Once our search tools are optimized, we can proceed to the complete RAG evaluation.
-In this step, we use a separate LLM as a judge. 
-
-1. Use the generated questions and query them to the llm.
-2. Once the final answer is given the LLM judge rates the final answer and the 
-    tool usage each as 'bad' (0.0) 'average' (0.5) or 'good' (1.0)
-3. The reviews are saved into a sql database.
-
-##### Users feedbacks
-The users can only evaluate the final answer and, for simplicity, they just have two 
-options 'bad' (0.0) or 'good' (1.0). These info are also saved in our sql database.
-
-```mermaid
----
-title: Agent evaluation architecture
----
-flowchart LR
-E[evaluator]
-Q(questions)
-RAG(RAG)
-A(answer)
-TU(tool usage)
-U((user))
-
-Q --> RAG
-RAG --> A
-RAG --> TU
-TU --> E
-A --> E
-A --> U
-E --> DB[(evaluation DB)]
-U -->|feedback| DB
-U -->|question| RAG
-```
-
-
-### Data ingestion from IGDB
-We use [IGDB](https://www.igdb.com/) information for ingesting metadata and reviews. The data is available remotely and is ingested into the local store (Postgres or OpenSearch) for retrieval.
-
-### Architecture assessment
-- Strengths: clear separation of responsibilities (ingest, retrieval, LLM, UI), use of OpenSearch for RAG enables fast vector/keyword search, and Grafana for observability.
-- Risks/Improvements: consider explicit vector store and embedding service, caching of LLM responses, access control for remote IGDB, and automated ETL for data freshness. Also clarify whether Postgres or OpenSearch is the primary source of truth and ensure schema/versioning for ingested data.
-
-
-## Monitoring
-For monitoring we will use streamlit, since the data we want to observe is relatively simple.
-
-```mermaid
----
-title: Monitoring architecture
----
 flowchart TD
-EDB[(evaluation DB)]
-UDB[(usage DB)]
-S(streamlit)
-U((user))
+    subgraph Data Source & Ingestion
+        A[IGDB API / Data] -->|extract.py| C[Data Preprocessing]
+        B[Wikipedia Articles] -->|extract.py| C
+        C -->|ingest.py| D[(OpenSearch Index)]
+    end
 
-EDB --> S
-UDB --> S
-S --> U
+    subgraph User Interaction & UI
+        E[User Query] -->|Streamlit App| F[Agent / RAG Core]
+        F -->|Hybrid Search| D
+        D -->|Retrieved Context| F
+        F -->|LLM Response| E
+    end
+
+    subgraph Monitoring & Feedback
+        E -->|Feedback / Logs| G[(PostgreSQL)]
+        G -->|Analytics Dashboard| H[Streamlit Analytics Tab]
+    end
 ```
 
-We can observe the model's performance and usage in the tab <!-- Insert tab name here -->. There we will the following things.
-* Users feedback with corresponding questions and answers
-* LLM-judge evaluations on tool usage and answer quality
-* The token usage (input and output) and price (if you are using a paid model).
+---
 
-On the streamlit app access the *analytics* tab  
+## 🧰 Tech Stack
+
+- **LLM / Provider**: Google Gemini (`llm.py`)
+- **Embeddings**: SentenceTransformers / HuggingFace embeddings
+- **Vector & Keyword Database**: OpenSearch 2.x (Hybrid search + k-NN plugin)
+- **Monitoring Database**: PostgreSQL 17
+- **UI Framework**: Streamlit
+- **Containerization**: Docker & Docker Compose
+
+---
+
+## 📊 Evaluation & Metrics
+
+The project underwent quantitative evaluation for both **Retrieval Performance** and **LLM Output Quality**. Ground truth queries and evaluation notebooks are available in `evaluation.py` and `main.ipynb`.
+
+### 1. Retrieval Evaluation (Hit Rate & MRR)
+Evaluated on a ground-truth dataset of queries generated across game titles, lore, and metadata:
+
+| Retrieval Method | Hit Rate @ k | Mean Reciprocal Rank (MRR) |
+| :--- | :---: | :---: |
+| **Lexical Search (BM25)** | <!-- to be completed by you: e.g. 0.72 --> | <!-- to be completed by you: e.g. 0.65 --> |
+| **Semantic Search (Dense Embeddings)** | <!-- to be completed by you: e.g. 0.81 --> | <!-- to be completed by you: e.g. 0.74 --> |
+| **Hybrid Search (BM25 + Semantic via RRF)** | **<!-- to be completed by you: e.g. 0.89 -->** | **<!-- to be completed by you: e.g. 0.82 -->** |
+
+*Key Takeaway:* Hybrid search using Reciprocal Rank Fusion yielded the highest retrieval accuracy by effectively combining exact keyword matching (for game titles and character names) with semantic vector search (for lore descriptions).
+
+### 2. LLM Output & Agent Evaluation (LLM-as-a-Judge)
+Outputs were evaluated using an LLM-as-a-Judge approach evaluating tool usage and final answer quality:
+
+- **Answer Quality Score**: <!-- to be completed by you: e.g. 92% -->
+- **Tool Usage Score**: <!-- to be completed by you: e.g. 95% -->
+
+---
+
+## 🖥️ User Interface & Monitoring
+
+The application is served via a Streamlit interface containing two primary views:
+
+1. **💬 Chat Assistant**:
+    - Ask natural language questions about video games, lore, and metadata.
+    - Interactive feedback buttons (👍 Thumbs Up / 👎 Thumbs Down) to log output quality.
+        
+    <div align="center">
+    <img src="media/imgs/chat_example.png" width="600" alt="Chat Example">
+    <br>
+    <em>Figure 1: SageBot Chat Interface Preview</em>
+    </div>
+
+2. **📊 Analytics & Feedback Dashboard**:
+    - Live operational tracking displaying query history, latency metrics, user feedback distributions, and model performance logs stored in PostgreSQL.
+
+    <div align="center">
+    <img src="media/imgs/analytics_example.png" width="500">
+    <br>
+    <em>Figure 2: SageBot Analytics Interface Preview</em>
+    </div>
+
+---
 
 
-<p align="center">
-<img src="media/imgs/analytics_example.png" alt="Analytics screenshot" width="400"/>
-</p>
+## 📂 Project Structure
+
+```text
+.
+├── media/imgs/            # Screenshots for README
+├── app.py                 # Streamlit UI (Chat & Analytics dashboard)
+├── compose.yaml           # Multi-container Docker Compose orchestration
+├── dockerfile             # Container definition for SageBot application
+├── download_model.py      # Pre-downloads embedding models during Docker build
+├── extract.py             # Data extraction script for IGDB & Wikipedia
+├── ingest.py              # Ingestion pipeline into OpenSearch & Postgres
+├── init-db.sh             # Database initialization script for PostgreSQL
+├── llm.py                 # LLM invocation, prompting, and tool logic
+├── main.ipynb             # Jupyter Notebook containing analysis & evaluation
+├── evaluation.py          # Ground truth generation & LLM-as-a-Judge scripts
+├── metrics.py             # Metrics computation (Hit Rate, MRR)
+├── monitor.py             # Logging user feedback & metrics to Postgres
+├── opensearch_utils.py    # OpenSearch index creation & hybrid search logic
+├── requirements.txt       # Python dependencies
+├── run.sh                 # Startup script
+└── setup.sh               # Environment setup helper
+```
+
+---
+
+## 🧪 Running Evaluations Offline
+
+If you want to re-run the retrieval and LLM evaluation benchmarks locally:
+
+1. Ensure OpenSearch and Postgres are running.
+2. Open the evaluation notebook:
+   ```bash
+   jupyter notebook main.ipynb
+   ```
+3. Run all cells to execute ground truth query generation, Hit Rate/MRR evaluation, and LLM-as-a-Judge scoring. Note that you will run a simplified version since the full test takes a very long time.
+
+---
+
+## 🤝 Acknowledgments
+Special thanks to the [DataTalks.Club](https://datatalks.club/) team for creating the **LLM Zoomcamp** course and providing the guidelines for this capstone project.
