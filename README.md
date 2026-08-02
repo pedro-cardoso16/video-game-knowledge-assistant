@@ -65,7 +65,7 @@ In the web page you should see
 </p>
 
 That's it! You are free to use the app. Make some questions and see the <u>📊 analytics</u> page
-**Don't forget to click on the refresh button**  to update the page view.
+**Don't forget to click on the 🔄 refresh button**  to update the page view.
 
 > ⚠️ <span style=color:gold>**Warning**</span>:  
 > Usually, the only reliable model is `gemini-3.1-flash-lite` if you are using the free tier. Sometimes `gemma-4-31b-it` may work, but more unreliable.
