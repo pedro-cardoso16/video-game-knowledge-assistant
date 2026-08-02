@@ -592,21 +592,29 @@ class OpenSearchBundler:
 
         # 7. Bulk Import Documents from JSONL
         def jsonl_generator():
+            skipped = 0
             with open(data_file, "r", encoding="utf-8") as f:
-                for line in f:
+                for line_num, line in enumerate(f, 1):
                     line = line.strip()
                     if not line:
                         continue
-                    doc = json.loads(line)
+                    try:
+                        doc = json.loads(line)
+                    except json.JSONDecodeError as e:
+                        skipped += 1
+                        preview = line[:120] + ("..." if len(line) > 120 else "")
+                        print(
+                            f"⚠️ Skipping malformed line {line_num} in {data_file}: {e}. "
+                            f"Content: {preview!r}"
+                        )
+                        continue
                     doc_id = doc.pop("_id", None)
                     yield {"_index": new_index_name, "_id": doc_id, "_source": doc}
-        
-        # def jsonl_generator():
-        #     with open(data_file, "r", encoding="utf-8") as f:
-        #         for line in f:
-        #             doc = json.loads(line)
-        #             doc_id = doc.pop("_id", None)
-        #             yield {"_index": new_index_name, "_id": doc_id, "_source": doc}
+            if skipped:
+                print(
+                    f"⚠️ Skipped {skipped} malformed line(s) while importing '{new_index_name}'. "
+                    f"See warnings above for details."
+                )
 
         print(f"📦 Bulk loading documents into '{new_index_name}'...")
         success, failed = helpers.bulk(self.client, jsonl_generator())
