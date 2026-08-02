@@ -1,15 +1,8 @@
-![Python](https://img.shields.io/badge/python-3.12-blue?logo=python)
-![Streamlit](https://img.shields.io/badge/Streamlit-1.59-red?logo=streamlit)
-![OpenSearch](https://img.shields.io/badge/OpenSearch-3.2-blue?logo=opensearch)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-blue?logo=postgresql)
-![Docker](https://img.shields.io/badge/Docker-Compose-blue?logo=docker)
-![License](https://img.shields.io/badge/license-MIT-green)
-
 # 🎮 Video Game Knowledge Assistant (SageBot)
 
 An end-to-end RAG (Retrieval-Augmented Generation) AI assistant and agent that unifies fragmented video game data from **IGDB** (structured metadata, release dates, genres, ratings) and **Wikipedia** (deep lore, game history, narrative details) into a single intelligent interface.
 
-Built as a capstone project for the [DataTalks.Club LLM Zoomcamp](https://github.com/DataTalksClub/llm-zoomcamp) cohort.
+Built as a capstone project for the [DataTalks.Club LLM Zoomcamp](https://github.com/DataTalksClub/llm-zoomcamp) 2026 cohort.
 
 ---
 
@@ -28,6 +21,9 @@ The **Video Game Knowledge Assistant** solves this by aggregating structured met
 ## 🚀 Quick Start & Installation
 
 ### Prerequisites & System Requirements
+First of all, you must install docker on your system.
+
+> 🐋 **Docker**: [Docker Engine](https://docs.docker.com/engine/install) or [Docker Desktop](https://docs.docker.com/get-started/get-docker/)
 
 Depending on your host system's hardware, you can run the assistant in one of two modes:
 
@@ -70,16 +66,19 @@ Execute the setup script:
 chmod +x setup.sh && ./setup.sh
 ```
 
-Open the generated `.env` and configure your keys:
+Open the generated `.env` file and configure your keys. You can create a free Google Gemini key using your Google account at **[Google AI Studio](https://aistudio.google.com/api-keys)**.
+
+> ⚠️ <span style="color:gold">**Warning**</span>  
+> Usually, the only reliable model is `gemini-3.1-flash-lite` if you are using the free tier. Sometimes `gemma-4-31b-it` may work, but is more unreliable.
 
 #### 3. Build and Run Container Services
-Run the automation script or start Docker Compose directly:
+Run the command below to start Docker Compose:
 
 ```bash
 docker compose up --build -d && docker compose logs sagebot -f
 ```
 
-Wait for the initialization process to finish. 
+Wait for the initialization process to finish.
 
 #### 4. Access the Application
 Once containers are healthy, open your browser and go to:
@@ -98,22 +97,23 @@ The system consists of five main components:
 
 ```mermaid
 flowchart TD
-    subgraph Data Source & Ingestion
-        A[IGDB API / Data] -->|extract.py| C[Data Preprocessing]
-        B[Wikipedia Articles] -->|extract.py| C
-        C -->|ingest.py| D[(OpenSearch Index)]
+    subgraph UI ["📱 User Interface"]
+        User((User)) <--> App["Streamlit Interface (app.py)"]
     end
 
-    subgraph User Interaction & UI
-        E[User Query] -->|Streamlit App| F[Agent / RAG Core]
-        F -->|Hybrid Search| D
-        D -->|Retrieved Context| F
-        F -->|LLM Response| E
+    subgraph AgentCore ["🧠 AI Agent & Intelligence"]
+        App <--> Assistant["LLM Assistant Core (llm.py)"]
+        Assistant <--> LLM["Google Gemini API"]
     end
 
-    subgraph Monitoring & Feedback
-        E -->|Feedback / Logs| G[(PostgreSQL)]
-        G -->|Analytics Dashboard| H[Streamlit Analytics Tab]
+    subgraph DataPipeline ["📥 Data Ingestion Pipeline"]
+        IGDB[("IGDB Database\n(Remote API)")] --> Ingest["Ingestion Pipeline\n(ingest.py)"]
+        Wiki[("Wikipedia Database\n(Remote Dump)")] --> Ingest
+    end
+
+    subgraph Storage ["💾 Knowledge Base"]
+        Ingest -->|Index Vectors & Metadata| OpenSearch[("OpenSearch DB\n(BM25 + k-NN Vector)")]
+        Assistant <-->|Hybrid Search via RRF| OpenSearch
     end
 ```
 
@@ -132,10 +132,65 @@ flowchart TD
 
 ## 📊 Evaluation & Metrics
 
-The project underwent quantitative evaluation for both **Retrieval Performance** and **LLM Output Quality**. Ground truth queries and evaluation notebooks are available in `evaluation.py` and `main.ipynb`.
+The project underwent quantitative evaluation for both **Retrieval Performance** and **LLM Output Quality**. Ground truth queries and evaluation notebooks are available in [`main.ipynb`](main.ipynb) with some description of how things work internally.
 
 ### 1. Retrieval Evaluation (Hit Rate & MRR)
 Evaluated on a ground-truth dataset of queries generated across game titles, lore, and metadata:
+
+```mermaid
+---
+title: Ground Truth Generation Pipeline
+---
+flowchart LR
+    subgraph Source ["Source"]
+        DB[("Knowledge DB")]
+    end
+
+    subgraph Generation ["Generation"]
+        LLM("LLM")
+        Q("questions")
+    end
+
+    subgraph Storage ["Storage"]
+        GT[("Ground Truth DB")]
+    end
+
+    DB -->|retrieve| LLM
+    LLM -->|generate| Q
+    Q --> GT
+```
+
+```mermaid
+---
+title: Search Evaluation Architecture
+---
+flowchart LR
+    subgraph Inputs ["Inputs"]
+        Q("Questions")
+        DB[("Knowledge DB")]
+        GT("Ground Truth")
+    end
+
+    subgraph Search ["Search Pipeline"]
+        S("Search")
+        R("Results")
+    end
+
+    subgraph Metrics ["Evaluation"]
+        E("Evaluator")
+        MRR("MRR (Mean Reciprocal Rank)")
+        HR("HR (Hit Rate)")
+    end
+
+    Q --> S
+    DB --> S
+    S --> R
+    R --> E
+    GT --> E
+    GT --> Q
+    E --> MRR
+    E --> HR
+```
 
 | Retrieval Method | Hit Rate @ k | Mean Reciprocal Rank (MRR) |
 | :--- | :---: | :---: |
@@ -147,6 +202,38 @@ Evaluated on a ground-truth dataset of queries generated across game titles, lor
 
 ### 2. LLM Output & Agent Evaluation (LLM-as-a-Judge)
 Outputs were evaluated using an LLM-as-a-Judge approach evaluating tool usage and final answer quality:
+
+```mermaid
+---
+title: Agent Evaluation Architecture
+---
+flowchart LR
+    subgraph Sources ["Queries & Interaction"]
+        U((user))
+        Q["questions"]
+    end
+
+    subgraph Core ["RAG System"]
+        RAG["RAG"]
+        A["answer"]
+        TU["tool usage"]
+    end
+
+    subgraph Evaluation ["Evaluation & Storage"]
+        E["evaluator"]
+        DB[("evaluation DB")]
+    end
+
+    Q --> RAG
+    U -->|question| RAG
+    RAG --> A
+    RAG --> TU
+    A --> U
+    A --> E
+    TU --> E
+    E --> DB
+    U -->|feedback| DB
+```
 
 - **Answer Quality Score**: <!-- to be completed by you: e.g. 92% -->
 - **Tool Usage Score**: <!-- to be completed by you: e.g. 95% -->
@@ -169,15 +256,38 @@ The application is served via a Streamlit interface containing two primary views
 
 2. **📊 Analytics & Feedback Dashboard**:
     - Live operational tracking displaying query history, latency metrics, user feedback distributions, and model performance logs stored in PostgreSQL.
+    - **Don't forget to click on the 🔄 refresh button** to update the page view.
 
     <div align="center">
-    <img src="media/imgs/analytics_example.png" width="500">
+    <img src="media/imgs/analytics_example.png" width="500" alt="Analytics Example">
     <br>
     <em>Figure 2: SageBot Analytics Interface Preview</em>
     </div>
 
+```mermaid
 ---
+title: Monitoring Architecture
+---
+flowchart TD
+    subgraph Storage ["Databases"]
+        EDB[("evaluation DB")]
+        UDB[("usage DB")]
+    end
 
+    subgraph Application ["Interface"]
+        S("streamlit")
+    end
+
+    
+    U((user))
+   
+
+    EDB --> S
+    UDB --> S
+    S --> U
+```
+
+---
 
 ## 📂 Project Structure
 
@@ -218,4 +328,4 @@ If you want to re-run the retrieval and LLM evaluation benchmarks locally:
 ---
 
 ## 🤝 Acknowledgments
-Special thanks to the [DataTalks.Club](https://datatalks.club/) team for creating the **LLM Zoomcamp** course and providing the guidelines for this capstone project.
+This project was developed as part of the LLM Zoomcamp 2026 cohort led by instructor [@alexeygrigorev](https://github.com/alexeygrigorev). Special thanks to the [DataTalks.Club](https://datatalks.club/) community for providing the resources for this project.
