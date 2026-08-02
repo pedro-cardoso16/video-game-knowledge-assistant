@@ -34,7 +34,7 @@ It's recommended to use a virtual machine with around with at, so as to keep thi
 isolated from your local machine.
 
 You must have docker engine installed in the system. 
-> **Docker engine** installation guide: https://docs.docker.com/engine/install  
+> 🐋 **Docker engine** installation guide: https://docs.docker.com/engine/install  
 <!-- > **Docker desktop** installation guide: https://docs.docker.com/get-started/get-docker/ -->
 
 Once this is done we can begin the setup.
@@ -67,7 +67,7 @@ In the web page you should see
 That's it! You are free to use the app. Make some questions and see the <u>📊 analytics</u> page
 **Don't forget to click on the refresh button**  to update the page view.
 
-> ⚠️ **Warning**:  
+> ⚠️ <span style=color:gold>**Warning**</span>:  
 > Usually, the only reliable model is `gemini-3.1-flash-lite` if you are using the free tier. Sometimes `gemma-4-31b-it` may work, but more unreliable.
 
 # How it works
