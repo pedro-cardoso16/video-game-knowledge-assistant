@@ -594,9 +594,19 @@ class OpenSearchBundler:
         def jsonl_generator():
             with open(data_file, "r", encoding="utf-8") as f:
                 for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
                     doc = json.loads(line)
                     doc_id = doc.pop("_id", None)
                     yield {"_index": new_index_name, "_id": doc_id, "_source": doc}
+        
+        # def jsonl_generator():
+        #     with open(data_file, "r", encoding="utf-8") as f:
+        #         for line in f:
+        #             doc = json.loads(line)
+        #             doc_id = doc.pop("_id", None)
+        #             yield {"_index": new_index_name, "_id": doc_id, "_source": doc}
 
         print(f"📦 Bulk loading documents into '{new_index_name}'...")
         success, failed = helpers.bulk(self.client, jsonl_generator())

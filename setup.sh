@@ -1,22 +1,17 @@
 #!/bin/bash
 
 FILE_NAME=".env"
-
-read -r -d '' FILE_TEMPLATE << EOM
+read -r -d '' FILE_TEMPLATE << 'EOM'
 # --- Gemini ---
 GEMINI_API_KEY='<your_api_key>'
-
 # --- IGDB ---
-# Only fill these ones if you intend to ingest IGDB data yourslef.
+# Only fill these ones if you intend to ingest IGDB data yourself.
 IGDB_CLIENT_ID='<optional_api_key>'
 IGDB_CLIENT_SECRET='<optional_client_secret>'
-
 # Do not change the fields below
-
 # --- Postgres ---
 POSTGRES_PASSWORD=postgres
 POSTGRES_USER=user
-
 # --- Opensearch ---
 OPENSEARCH_USER=admin
 OPENSEARCH_PASSWORD='Opensearch16admin#'
@@ -25,17 +20,20 @@ EOM
 if [ -f "${FILE_NAME}" ]; then
     read -p "File $FILE_NAME already exists. Overwrite? (y/N): " response
 
-    if [[ "$response" != "y" && "$response" != "Y" ]]; then
+    if [[ "$response" == "y" || "$response" == "Y" ]]; then
+        echo "$FILE_TEMPLATE" > "$FILE_NAME"
+        echo "Created $FILE_NAME"
+    else
         echo "Skipping file creation."
-    else 
-        # Create .env file
-        echo "$FILE_TEMPLATE" > .env
-    fi     
+    fi
+else
+    echo "$FILE_TEMPLATE" > "$FILE_NAME"
+    echo "Created $FILE_NAME"
 fi
 
 STREAMLIT_FILE=".streamlit/secrets.toml"
 
-read -r -d '' STREAMLIT_TEMPLATE << EOM
+read -r -d '' STREAMLIT_TEMPLATE << 'EOM'
 [postgres]
 dialect = "postgresql"
 host = "postgres"

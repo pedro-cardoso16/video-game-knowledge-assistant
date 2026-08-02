@@ -33,9 +33,9 @@ fast, evidence-based answers for any gaming curiosity.
 It's recommended to use a virtual machine with around with at, so as to keep things
 isolated from your local machine.
 
-You must have docker engine installed in the system. 
-> 🐋 **Docker engine** installation guide: https://docs.docker.com/engine/install  
-<!-- > **Docker desktop** installation guide: https://docs.docker.com/get-started/get-docker/ -->
+You must have 🐋 docker installed in the system . 
+> **Docker engine** installation guide: https://docs.docker.com/engine/install  
+> **Docker desktop** installation guide: https://docs.docker.com/get-started/get-docker/
 
 Once this is done we can begin the setup.
 
@@ -46,12 +46,14 @@ chmod +x setup.sh && ./setup.sh
 ```
 This will create a `.env` file. 
 
-In this file, replace the `<>` fields with your keys. You can create a free one using your google account and accessing the site https://aistudio.google.com/api-keys. 
+In this file, replace the `<>` fields with your keys. You can create a free one 
+using your google account and accessing the site https://aistudio.google.com/api-keys. 
 
 ```bash
-docker compose up --build -d
+docker compose up --build
 ```
-Wait until the completion is done.
+Wait until the completion is done. HWen it's done you should see sagebot info telling to 
+open the streamlit app at a given url.
 
 Open in a web browser in the following address:
 ```bash
@@ -67,7 +69,7 @@ In the web page you should see
 That's it! You are free to use the app. Make some questions and see the <u>📊 analytics</u> page
 **Don't forget to click on the 🔄 refresh button**  to update the page view.
 
-> ⚠️ <span style=color:gold>**Warning**</span>:  
+> ⚠️ <span style=color:gold>**Warning**</span>  
 > Usually, the only reliable model is `gemini-3.1-flash-lite` if you are using the free tier. Sometimes `gemma-4-31b-it` may work, but more unreliable.
 
 # How it works
