@@ -18,6 +18,7 @@ services:
       - 8.8.8.8
       - 1.1.1.1
     environment:
+      - network.host=0.0.0.0
       - "OPENSEARCH_INITIAL_ADMIN_PASSWORD=Opensearch16admin#"
       - discovery.type=single-node
       - bootstrap.memory_lock=true
@@ -66,7 +67,7 @@ services:
       - OPENSEARCH_HOST=opensearch
       - OPENSEARCH_PORT=9200
       - OPENSEARCH_USER=admin
-      - OPENSEARCH_PASSWORD=Opensearch16admin#
+      - "OPENSEARCH_PASSWORD=Opensearch16admin#"
     networks:
       - games
     env_file:
