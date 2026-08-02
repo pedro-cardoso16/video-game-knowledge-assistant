@@ -1,6 +1,3 @@
-<!-- [![GitHub Sponsors](https://img.shields.io/badge/Sponsor_me-EA4AAA?style=for-the-badge&logo=github-sponsors&logoColor=white)](https://github.com/sponsors/pedro-cardoso16)
-[![Buy Me a Coffee](https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/pedro.cardoso) -->
-
 ![Python](https://img.shields.io/badge/python-3.12-blue?logo=python)
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.59-red?logo=streamlit)
 ![OpenSearch](https://img.shields.io/badge/OpenSearch-3.2-blue?logo=opensearch)
@@ -33,13 +30,15 @@ fast, evidence-based answers for any gaming curiosity.
 ## Getting started
 
 ### Docker installation
-It's recommended to use github codespaces, in this way you won't need to install anything in your local machine.
+It's recommended to use a virtual machine with around with at, so as to keep things
+isolated from your local machine.
 
-If you intend to use in your local machine must have docker engine installed in your system or docker desktop. 
+You must have docker engine installed in the system. 
 > **Docker engine** installation guide: https://docs.docker.com/engine/install  
-> **Docker desktop** installation guide: https://docs.docker.com/get-started/get-docker/
+<!-- > **Docker desktop** installation guide: https://docs.docker.com/get-started/get-docker/ -->
 
 Once this is done we can begin the setup.
+
 ### Run app
 In the main project folder execute:
 ```bash
@@ -54,9 +53,9 @@ docker compose up --build -d
 ```
 Wait until the completion is done.
 
-If you are in codespaces a dedicated window will be open. If you are on a local machine. Open in a web browser in the following address:
+Open in a web browser in the following address:
 ```bash
-https://localhost:9200
+https://localhost:8501
 ```
 
 In the web page you should see
@@ -65,6 +64,11 @@ In the web page you should see
 <img src="media/imgs/chat_example.png" alt="Chat screenshot" width="400"/>
 </p>
 
+That's it! You are free to use the app. Make some questions and see the <u>📊 analytics</u> page
+**Don't forget to click on the refresh button**  to update the page view.
+
+> ⚠️ **Warning**:  
+> Usually, the only reliable model is `gemini-3.1-flash-lite` if you are using the free tier. Sometimes `gemma-4-31b-it` may work, but more unreliable.
 
 # How it works
 
