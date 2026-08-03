@@ -1,6 +1,7 @@
 import os
 import glob
 
+from tqdm import tqdm
 from opensearch_utils import setup_embedder
 from opensearchpy import OpenSearch
 from dotenv import load_dotenv
@@ -27,7 +28,7 @@ def assemble_file(file_path: str, force_reassemble: bool = False):
     # 3. Rebuild the file
     try:
         with open(file_path, "wb") as output_file:
-            for part in parts:
+            for part in tqdm(parts, desc=f"Assembling {file_path}", unit="part"):
                 print(f"Appending {part}...")
                 with open(part, "rb") as pf:
                     output_file.write(pf.read())
