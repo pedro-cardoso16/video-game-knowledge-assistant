@@ -17,6 +17,7 @@ import pandas as pd
 import psycopg as pg
 import streamlit as st
 import json
+import sys
 from opensearchpy import OpenSearch, helpers
 import subprocess
 import os
@@ -502,6 +503,18 @@ class OpenSearchBundler:
     ):
         print(f"🚀 Checking index status for: {new_index_name}...")
 
+        def _count_lines(file_path: str) -> tuple[int, int]:
+            total_lines = 0
+            total_docs = 0
+            with open(file_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    total_lines += 1
+                    if line.strip():
+                        total_docs += 1
+            return total_lines, total_docs
+
+        total_lines, total_docs = _count_lines(data_file)
+
         # 1. Register search pipeline for RRF hybrid search
         search_pipeline_body = {
             "description": "Modern RRF rank-blending search pipeline",
@@ -594,9 +607,11 @@ class OpenSearchBundler:
         def jsonl_generator():
             skipped = 0
             with open(data_file, "r", encoding="utf-8") as f:
-                for line_num, line in enumerate(f, 1):
-                    line = line.strip()
-                    if not line:
+                for line_num, line in enumerate(
+                    f,
+                    1,
+                ):
+                    if not line.strip():
                         continue
                     try:
                         doc = json.loads(line)
@@ -616,10 +631,41 @@ class OpenSearchBundler:
                     f"See warnings above for details."
                 )
 
+        print(f"📦 Counting documents in '{data_file}'...")
         print(f"📦 Bulk loading documents into '{new_index_name}'...")
-        success, failed = helpers.bulk(self.client, jsonl_generator())
+
+        successful = 0
+        failed_count = 0
+        total_attempted = 0
+        progress_interval = max(1, total_docs // 100)
+
+        for ok, result in helpers.streaming_bulk(
+            self.client,
+            jsonl_generator(),
+            chunk_size=500,
+            max_retries=3,
+            raise_on_error=False,
+        ):
+            total_attempted += 1
+            if ok:
+                successful += 1
+            else:
+                failed_count += 1
+                print(f"⚠️ Import failed for document {total_attempted}: {result}")
+
+            if total_attempted % progress_interval == 0 or total_attempted == total_docs:
+                percent = total_attempted / total_docs * 100 if total_docs else 0
+                bar_len = int(100 * total_attempted / total_docs) if total_docs else 0
+                bar = "#" * bar_len + "-" * (100 - bar_len)
+                print(
+                    f"Importing into {new_index_name}: [{bar}] "
+                    f"{total_attempted}/{total_docs} ({percent:.1f}%)"
+                )
+                sys.stdout.flush()
+
         print(
-            f"✅ Successfully imported {success} documents into '{new_index_name}'. Failures: {failed}"
+            f"✅ Import complete for '{new_index_name}'. "
+            f"Attempted: {total_attempted}, Successful: {successful}, Failures: {failed_count}"
         )
 
 
@@ -654,9 +700,28 @@ class PostgresBundler:
             pass
 
         try:
-            with open(sql_file, "r") as f:
-                cmd = f"docker exec -i -e PGPASSWORD={self.password} {self.container_name} psql -U {self.user} -d {db_name}"
-                subprocess.run(cmd, shell=True, stdin=f, check=True)
+            file_size = os.path.getsize(sql_file)
+            cmd = f"docker exec -i -e PGPASSWORD={self.password} {self.container_name} psql -U {self.user} -d {db_name}"
+            with open(sql_file, "rb") as f, subprocess.Popen(
+                cmd,
+                shell=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            ) as proc, tqdm(
+                total=file_size,
+                desc=f"Importing {os.path.basename(sql_file)}",
+                unit="B",
+                unit_scale=True,
+                unit_divisor=1024,
+            ) as pbar:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    proc.stdin.write(chunk) # type: ignore
+                    pbar.update(len(chunk))
+                proc.stdin.close() # type: ignore
+                stdout, stderr = proc.communicate()
+                if proc.returncode != 0:
+                    raise subprocess.CalledProcessError(proc.returncode, cmd, output=stdout, stderr=stderr)
             print(f"✅ Database {db_name} restored successfully.")
         except subprocess.CalledProcessError as e:
             print(f"❌ Import failed: {e}")
