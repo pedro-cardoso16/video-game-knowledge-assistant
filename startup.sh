@@ -19,5 +19,14 @@ echo "OpenSearch is up! Importing data..."
 
 PYTHONUNBUFFERED=1 python extract.py || { echo "extract.py failed — aborting startup"; exit 1; }
 
+echo "Waiting for OpenSearch indices to become searchable..."
+
+until curl -s -u "$OPENSEARCH_USER:$OPENSEARCH_PASSWORD" \
+  "http://$OPENSEARCH_HOST:$OPENSEARCH_PORT/_cluster/health?wait_for_status=yellow&timeout=60s" \
+  > /dev/null; do
+  echo "OpenSearch cluster still warming up..."
+  sleep 15
+done
+
 echo "Starting application..."
 streamlit run app.py --server.port=8501 --server.address=0.0.0.0
