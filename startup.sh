@@ -17,7 +17,7 @@ done
 
 echo "OpenSearch is up! Importing data..."
 
-python extract.py || { echo "extract.py failed — aborting startup"; exit 1; }
+PYTHONUNBUFFERED=1 python extract.py || { echo "extract.py failed — aborting startup"; exit 1; }
 
 echo "Starting application..."
 streamlit run app.py --server.port=8501 --server.address=0.0.0.0
