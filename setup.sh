@@ -77,4 +77,3 @@ fi
 
 # Necessary for opensearch hybrid search (must have extra memory).
 sudo sysctl -w vm.max_map_count=262144
-
