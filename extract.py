@@ -1,5 +1,6 @@
 import os
 import glob
+import time
 
 from tqdm import tqdm
 from opensearch_utils import setup_embedder
@@ -61,6 +62,18 @@ opensearch_client = OpenSearch(
     ssl_show_warn=False,
 )
 
+def wait_for_index_ready(client, index_name, timeout=120):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            count = client.count(index=index_name)["count"]
+            if count > 0:
+                return True
+        except Exception:
+            pass
+        time.sleep(3)
+    raise RuntimeError(f"Index {index_name} did not become ready in {timeout}s")
+
 if __name__ == "__main__":
     setup_embedder(opensearch_client)
 
@@ -79,12 +92,17 @@ if __name__ == "__main__":
         "igdb",
         force_reimport=FORCE_REIMPORT,
     )
+    wait_for_index_ready(opensearch_client, "igdb", timeout=180)
+    print("✅ IGDB index is ready and searchable.")
+
     opensearch_bundler.import_index(
         "data/wikipedia_index.jsonl",
         "data/wikipedia_config.json",
         "wikipedia",
         force_reimport=FORCE_REIMPORT,
     )
+    wait_for_index_ready(opensearch_client, "wikipedia", timeout=180)
+    print("✅ Wikipedia index is ready and searchable.")
 
     # postgres_blunder.import_database("data/usage.sql", "usage")
     # postgres_blunder.import_database("data/evaluations.sql", "evaluations")
