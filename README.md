@@ -77,6 +77,9 @@ Run the command below to start Docker Compose:
 ```bash
 docker compose up --build -d && docker compose logs sagebot -f
 ```
+> ⚠️ <span style="color:gold">**Warning**</span>  
+> This part can take a very long time depending on your hardware $\sim 30$ min,
+> so, please be patient.
 
 Wait for the initialization process to finish.
 
@@ -191,16 +194,31 @@ flowchart LR
     E --> MRR
     E --> HR
 ```
+When performing the evaluations, we get this mean result for the two indices 
+(IGDB and Wikipedia)
+<div align="center">
 
 | Retrieval Method | Hit Rate @ k | Mean Reciprocal Rank (MRR) |
 | :--- | :---: | :---: |
-| **Lexical Search (BM25)** | <!-- to be completed by you: e.g. 0.72 --> | <!-- to be completed by you: e.g. 0.65 --> |
-| **Semantic Search (Dense Embeddings)** | <!-- to be completed by you: e.g. 0.81 --> | <!-- to be completed by you: e.g. 0.74 --> |
-| **Hybrid Search (BM25 + Semantic via RRF)** | **<!-- to be completed by you: e.g. 0.89 -->** | **<!-- to be completed by you: e.g. 0.82 -->** |
+| **Lexical Search (BM25)** | 0.822 | 0.735 |
+| **Semantic Search (Dense Embeddings)** | 0.316 | 0.236 |
+| **Hybrid Search (BM25 + Semantic via RRF)** | **0.793** | **0.707** |
 
-*Key Takeaway:* Hybrid search using Reciprocal Rank Fusion yielded the highest retrieval accuracy by effectively combining exact keyword matching (for game titles and character names) with semantic vector search (for lore descriptions).
+</div>
+
+**Key Takeaway:** Surprisingly, semantic and hybrid search both underperformed 
+compared to lexical search. While this could be partly due to embedding quality, 
+it is primarily due to how the evaluation was constructed. Since we are working 
+with a highly specific dataset, exact keyword matches tend to perform better. 
+However, if our evaluation were based on more open-ended questions, hybrid 
+search would likely outperform.
+
+In a nutshell, semantic and hybrid search performed poorly because the benchmark 
+favors exact document matching, not because semantic search itself is flawed.
+
 
 ### 2. LLM Output & Agent Evaluation (LLM-as-a-Judge)
+
 Outputs were evaluated using an LLM-as-a-Judge approach evaluating tool usage and final answer quality:
 
 ```mermaid
@@ -235,8 +253,8 @@ flowchart LR
     U -->|feedback| DB
 ```
 
-- **Answer Quality Score**: <!-- to be completed by you: e.g. 92% -->
-- **Tool Usage Score**: <!-- to be completed by you: e.g. 95% -->
+- **Answer Quality Score**: 0.4
+- **Tool Usage Score**: 0.7
 
 ---
 
