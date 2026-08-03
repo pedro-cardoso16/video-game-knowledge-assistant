@@ -87,6 +87,8 @@ Wait for the initialization process to finish.
 Once containers are healthy, open your browser and go to:
 👉 **[http://localhost:8501](http://localhost:8501)**
 
+Please click on the `🔄 New conversation` as it may be necessary to refresh in 
+order to make the search features work.
 ---
 
 ## 🏗️ Architecture & Pipeline Flow
