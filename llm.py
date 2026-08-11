@@ -148,7 +148,7 @@ class RAGClient:
         )
 
         max_turns = 10
-        max_retries = 5
+        max_retries = 10
         turn = 0
 
         while turn < max_turns:
