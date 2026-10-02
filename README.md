@@ -2,8 +2,6 @@
 
 An end-to-end RAG (Retrieval-Augmented Generation) AI assistant and agent that unifies fragmented video game data from **IGDB** (structured metadata, release dates, genres, ratings) and **Wikipedia** (deep lore, game history, narrative details) into a single intelligent interface.
 
-Built as a capstone project for the [DataTalks.Club LLM Zoomcamp](https://github.com/DataTalksClub/llm-zoomcamp) 2026 cohort.
-
 ---
 
 ## 📌 Problem Statement
@@ -344,8 +342,3 @@ If you want to re-run the retrieval and LLM evaluation benchmarks locally:
    jupyter notebook main.ipynb
    ```
 3. Run all cells to execute ground truth query generation, Hit Rate/MRR evaluation, and LLM-as-a-Judge scoring. Note that you will run a simplified version since the full test takes a very long time.
-
----
-
-## 🤝 Acknowledgments
-This project was developed as part of the LLM Zoomcamp 2026 cohort led by instructor [@alexeygrigorev](https://github.com/alexeygrigorev). Special thanks to the [DataTalks.Club](https://datatalks.club/) community for providing the resources for this project.
